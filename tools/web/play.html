@@ -1,0 +1,365 @@
+<title>PocketPet</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+  /* A toy you hold: one mint plastic handheld on a soft lilac table. Deliberately
+     single-theme (it's a physical object), so every color is set explicitly. */
+  :root {
+    --table: #efe4f1;
+    --table-ink: #5b4a5c;
+    --shell: #bfe6d3;
+    --shell-dark: #8fc9b0;
+    --shell-edge: #6fae95;
+    --bezel: #3c2a35;          /* matches the pet's outline ink on screen */
+    --button: #f27aa8;
+    --button-dark: #c9547f;
+    --dpad: #4a3a46;
+    --pill: #8a7a88;
+    --label: #3c2a35;
+    --font-toy: "Fredoka", "Trebuchet MS", system-ui, sans-serif;
+    --font-text: "Atkinson Hyperlegible", system-ui, sans-serif;
+    color-scheme: light;
+  }
+  html, body { height: 100%; }
+  body {
+    background: var(--table);
+    color: var(--table-ink);
+    font-family: var(--font-text);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    padding-block: 24px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    box-sizing: border-box;
+  }
+
+  .console {
+    width: min(100%, 680px);
+    background: var(--shell);
+    border-radius: 28px 28px 64px 28px;
+    box-shadow: inset 0 -6px 0 var(--shell-dark), 0 2px 0 var(--shell-edge), 0 18px 40px rgb(91 74 92 / 0.18);
+    padding: clamp(14px, 3.5vw, 26px);
+    display: grid;
+    gap: clamp(14px, 3vw, 22px);
+    box-sizing: border-box;
+  }
+  .bezel {
+    background: var(--bezel);
+    border-radius: 14px 14px 30px 14px;
+    padding: clamp(10px, 2.4vw, 18px);
+    display: grid;
+    gap: 8px;
+  }
+  .bezel-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #c8b7c3;
+    font: 600 11px/1 var(--font-toy);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .led { width: 8px; height: 8px; border-radius: 50%; background: #ff6f91; box-shadow: 0 0 6px #ff6f91; }
+  .led.off { background: #6a5563; box-shadow: none; }
+  canvas {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    aspect-ratio: 320 / 170;
+    image-rendering: pixelated;
+    border-radius: 4px;
+    background: #1d1419;
+  }
+
+  .brand {
+    font: 600 clamp(18px, 4vw, 24px)/1 var(--font-toy);
+    color: var(--label);
+    letter-spacing: 0.02em;
+    margin: 0;
+  }
+  .brand span { color: var(--button-dark); }
+
+  .controls {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 12px;
+  }
+
+  button { font: inherit; color: inherit; -webkit-tap-highlight-color: transparent; touch-action: none; user-select: none; -webkit-user-select: none; }
+  button:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+
+  .dpad {
+    display: grid;
+    grid-template: repeat(3, clamp(34px, 9vw, 46px)) / repeat(3, clamp(34px, 9vw, 46px));
+  }
+  .dpad button {
+    border: 0;
+    background: var(--dpad);
+    color: #b9a8b4;
+    font-size: 13px;
+    cursor: pointer;
+    box-shadow: inset 0 -3px 0 rgb(0 0 0 / 0.35);
+  }
+  .dpad .up { grid-area: 1 / 2; border-radius: 8px 8px 0 0; }
+  .dpad .left { grid-area: 2 / 1; border-radius: 8px 0 0 8px; }
+  .dpad .mid { grid-area: 2 / 2; background: var(--dpad); }
+  .dpad .right { grid-area: 2 / 3; border-radius: 0 8px 8px 0; }
+  .dpad .down { grid-area: 3 / 2; border-radius: 0 0 8px 8px; }
+  .dpad button.down-now, .dpad button:active { background: #2e2229; }
+
+  .middle { display: flex; justify-content: center; gap: clamp(10px, 3vw, 22px); }
+  .pill { display: grid; justify-items: center; gap: 6px; }
+  .pill button {
+    width: clamp(40px, 10vw, 54px);
+    height: 14px;
+    border: 0;
+    border-radius: 7px;
+    background: var(--pill);
+    transform: rotate(-22deg);
+    cursor: pointer;
+    box-shadow: inset 0 -2px 0 rgb(0 0 0 / 0.25);
+  }
+  .pill button.down-now, .pill button:active { background: #6b5d69; }
+  .pill span {
+    font: 600 11px/1 var(--font-toy);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--label);
+  }
+
+  .ab {
+    display: grid;
+    grid-template-columns: auto auto;
+    gap: 12px;
+    transform: rotate(-22deg);
+  }
+  .ab .b { grid-area: 1 / 1; margin-top: 22px; }
+  .ab .a { grid-area: 1 / 2; }
+  .ab button {
+    width: clamp(44px, 12vw, 58px);
+    aspect-ratio: 1;
+    max-width: 100%;
+    border-radius: 50%;
+    border: 0;
+    background: var(--button);
+    color: #fff;
+    font: 600 18px/1 var(--font-toy);
+    cursor: pointer;
+    box-shadow: inset 0 -4px 0 var(--button-dark), 0 2px 0 var(--shell-edge);
+  }
+  .ab button.down-now, .ab button:active { transform: translateY(2px); box-shadow: inset 0 -2px 0 var(--button-dark); }
+
+  .help {
+    width: min(100%, 680px);
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px 18px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .help p { margin: 0; text-wrap: balance; text-align: center; }
+  kbd {
+    font: 700 12px/1 var(--font-text);
+    background: #fff;
+    border: 1px solid #d6c6d6;
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    padding: 2px 6px;
+    color: var(--table-ink);
+  }
+  .note { font-size: 13px; color: #806f81; }
+
+  @media (max-width: 480px) {
+    .controls { grid-template-columns: auto auto; }
+    .middle { grid-column: 1 / -1; order: 3; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ab button.down-now, .ab button:active { transform: none; }
+  }
+</style>
+
+<main class="console" aria-label="PocketPet handheld">
+  <div class="bezel">
+    <div class="bezel-top"><span class="led" id="led"></span><span id="status">Power</span></div>
+    <canvas id="screen" width="320" height="170" aria-label="Game screen"></canvas>
+  </div>
+  <p class="brand">Pocket<span>Pet</span></p>
+  <div class="controls">
+    <div class="dpad" aria-label="D-pad">
+      <button class="up" data-btn="0" aria-label="Up">▲</button>
+      <button class="left" data-btn="2" aria-label="Left">◀</button>
+      <span class="mid" aria-hidden="true"></span>
+      <button class="right" data-btn="3" aria-label="Right">▶</button>
+      <button class="down" data-btn="1" aria-label="Down">▼</button>
+    </div>
+    <div class="middle">
+      <div class="pill"><button data-btn="7" aria-label="Select"></button><span>Select</span></div>
+      <div class="pill"><button data-btn="6" aria-label="Start"></button><span>Start</span></div>
+    </div>
+    <div class="ab">
+      <button class="b" data-btn="5" aria-label="B">B</button>
+      <button class="a" data-btn="4" aria-label="A">A</button>
+    </div>
+  </div>
+</main>
+
+<section class="help" aria-label="Keyboard controls">
+  <p><kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> D-pad</p>
+  <p><kbd>X</kbd> A</p>
+  <p><kbd>Z</kbd> B</p>
+  <p><kbd>Enter</kbd> Start</p>
+  <p><kbd>Shift</kbd> Select</p>
+  <p class="note">The pet is saved in this browser. Sound starts after your first button press.</p>
+</section>
+
+<script>
+(() => {
+  const WASM = "__WASM_BASE64__";
+  const canvas = document.getElementById("screen");
+  const ctx = canvas.getContext("2d");
+  const image = ctx.createImageData(320, 170);
+  const led = document.getElementById("led");
+  const status = document.getElementById("status");
+  let game = null;
+  let sleeping = false;
+
+  // ---- Saving: localStorage, or memory if the browser won't allow it ----
+  const memoryStore = {};
+  const store = {
+    get(k) { try { const v = localStorage.getItem("pocketpet:" + k); if (v !== null) return v; } catch (e) {} return memoryStore[k] ?? null; },
+    set(k, v) { memoryStore[k] = v; try { localStorage.setItem("pocketpet:" + k, v); } catch (e) {} },
+  };
+  const bytes = () => new Uint8Array(game.memory.buffer);
+  const cString = (ptr) => { const b = bytes(); let end = ptr; while (b[end]) end++; return new TextDecoder().decode(b.subarray(ptr, end)); };
+
+  // ---- Buzzer: a quiet square wave ----
+  let audio = null, osc = null, gain = null;
+  function startAudio() {
+    if (audio) { if (audio.state === "suspended") audio.resume(); return; }
+    try {
+      audio = new AudioContext();
+      osc = audio.createOscillator();
+      gain = audio.createGain();
+      osc.type = "square";
+      gain.gain.value = 0;
+      osc.connect(gain).connect(audio.destination);
+      osc.start();
+    } catch (e) { audio = null; }
+  }
+  function tone(freq) {
+    if (!audio) return;
+    const t = audio.currentTime;
+    if (freq > 0) { osc.frequency.setValueAtTime(freq, t); gain.gain.setTargetAtTime(0.035, t, 0.005); }
+    else gain.gain.setTargetAtTime(0, t, 0.01);
+  }
+
+  const imports = {
+    env: {
+      js_now_ms: () => performance.now(),
+      js_local_seconds: () => {
+        const d = new Date();
+        return d.getTime() / 1000 - d.getTimezoneOffset() * 60 - 946684800;
+      },
+      js_show: (ptr, w, h) => {
+        const src = new Uint8Array(game.memory.buffer, ptr, w * h * 2);
+        const dst = image.data;
+        for (let i = 0, j = 0; i < src.length; i += 2, j += 4) {
+          const v = (src[i] << 8) | src[i + 1];  // stored high byte first
+          dst[j] = ((v >> 11) & 31) * 255 / 31;
+          dst[j + 1] = ((v >> 5) & 63) * 255 / 63;
+          dst[j + 2] = (v & 31) * 255 / 31;
+          dst[j + 3] = 255;
+        }
+        ctx.putImageData(image, 0, 0);
+      },
+      js_tone: (freq) => tone(freq),
+      js_sleep: () => {
+        sleeping = true;
+        tone(0);
+        led.classList.add("off");
+        status.textContent = "Asleep — press any button";
+      },
+      js_prefs_get: (keyPtr, buf, max) => {
+        const hex = store.get(cString(keyPtr));
+        if (hex === null) return -1;
+        const n = hex.length / 2;
+        const b = bytes();
+        for (let i = 0; i < Math.min(n, max); i++) b[buf + i] = parseInt(hex.substr(i * 2, 2), 16);
+        return n;
+      },
+      js_prefs_set: (keyPtr, buf, len) => {
+        const b = bytes();
+        let hex = "";
+        for (let i = 0; i < len; i++) hex += b[buf + i].toString(16).padStart(2, "0");
+        store.set(cString(keyPtr), hex);
+      },
+    },
+  };
+
+  // ---- Buttons: keyboard and the on-screen handheld ----
+  const KEYS = {
+    ArrowUp: 0, ArrowDown: 1, ArrowLeft: 2, ArrowRight: 3,
+    KeyX: 4, KeyK: 4, KeyZ: 5, KeyJ: 5,
+    Enter: 6, ShiftLeft: 7, ShiftRight: 7, Backspace: 7,
+  };
+  const buttonEls = {};
+  document.querySelectorAll("[data-btn]").forEach((el) => {
+    const id = +el.dataset.btn;
+    (buttonEls[id] ||= []).push(el);
+    el.addEventListener("pointerdown", (e) => { e.preventDefault(); el.setPointerCapture?.(e.pointerId); press(id, true); });
+    for (const ev of ["pointerup", "pointercancel", "lostpointercapture"]) el.addEventListener(ev, () => press(id, false));
+    el.addEventListener("contextmenu", (e) => e.preventDefault());
+    el.addEventListener("keydown", (e) => { if (e.code === "Space") { e.preventDefault(); if (!e.repeat) press(id, true); } });
+    el.addEventListener("keyup", (e) => { if (e.code === "Space") press(id, false); });
+  });
+
+  // The game reads buttons once a frame, so keep every press down for at
+  // least 80 ms; otherwise a quick click or tap can slip between frames.
+  const downAt = {};
+  function press(id, down) {
+    if (!game) return;
+    if (down) downAt[id] = performance.now();
+    else if (performance.now() - (downAt[id] ?? 0) < 80) {
+      setTimeout(() => press(id, false), 80 - (performance.now() - downAt[id]));
+      return;
+    }
+    startAudio();
+    (buttonEls[id] || []).forEach((el) => el.classList.toggle("down-now", down));
+    game.pp_button(id, down ? 1 : 0);
+    if (down && sleeping) {
+      sleeping = false;
+      led.classList.remove("off");
+      status.textContent = "Power";
+      game.pp_wake();
+    }
+  }
+  addEventListener("keydown", (e) => {
+    if (!(e.code in KEYS) || e.metaKey || e.ctrlKey || e.altKey) return;
+    e.preventDefault();
+    if (!e.repeat) press(KEYS[e.code], true);
+  });
+  addEventListener("keyup", (e) => { if (e.code in KEYS) press(KEYS[e.code], false); });
+  addEventListener("blur", () => { for (let i = 0; i < 8; i++) press(i, false); });
+
+  // ---- Start ----
+  function frame() {
+    if (!sleeping) game.pp_loop();
+    requestAnimationFrame(frame);
+  }
+  const wasm = Uint8Array.from(atob(WASM), (c) => c.charCodeAt(0));
+  WebAssembly.instantiate(wasm, imports).then(({ instance }) => {
+    game = instance.exports;
+    game._initialize();
+    game.pp_start();
+    requestAnimationFrame(frame);
+  }).catch((err) => {
+    status.textContent = "This browser couldn't start the game: " + err.message;
+  });
+})();
+</script>

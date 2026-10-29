@@ -32,7 +32,8 @@ static ButtonState buttons[BTN_COUNT];
 
 static bool firstRun = false;     // going through egg -> color -> ears -> name -> clock
 static bool dimmed = false;
-static bool sleeping = false;     // only ever true in the computer simulation
+static bool sleeping = false;     // only ever true on a computer (simulation, web)
+static uint32_t sleepAtMs = 0;    // when "Bye bye!" ends and the real sleep starts
 static uint32_t lastInputMs = 0;
 static uint32_t lastTickMs = 0;
 static uint32_t lastSaveMs = 0;
@@ -250,19 +251,12 @@ static void finishSetup() {
   play(SND_HAPPY);
 }
 
+// Says "Bye bye!" for a moment; loop() then puts the handheld to sleep.
 static void goToSleep() {
   saveAll();
   go(SCR_BYE);
   play(SND_BYE);
-  uint32_t until = millis() + 1500;
-  while (millis() < until) {
-    soundUpdate(millis());
-    uiDraw(frame, pet, ui, millis());
-    hwShow(frame);
-    delay(30);
-  }
-  hwSleep();
-  sleeping = true;  // (only reached in the computer simulation)
+  sleepAtMs = millis() + 1500;
 }
 
 // ---------------------------------------------------------------------------
@@ -585,9 +579,21 @@ void loop() {
   if (sleeping) return;
   uint32_t now = millis();
 
+  if (ui.screen == SCR_BYE) {
+    soundUpdate(now);
+    if ((int32_t)(now - sleepAtMs) >= 0) {
+      hwSleep();
+      sleeping = true;  // (only reached on a computer)
+      return;
+    }
+    uiDraw(frame, pet, ui, now);
+    hwShow(frame);
+    delay(10);
+    return;
+  }
+
   soundUpdate(now);
   handleButtons(now);
-  if (sleeping) return;
 
   if (ui.anim != ANIM_NONE && now - ui.animStart > animLength(ui.anim)) {
     if (ui.anim == ANIM_HATCH) go(SCR_PICK_COLOR);

@@ -9,6 +9,18 @@ cheers up again.
 
 ![All the screens](docs/screenshots/all-screens.png)
 
+## Play it in a browser
+
+`docs/play.html` is the same game, compiled for the web. Open it in any
+browser on a computer, tablet or phone: no install, no handheld needed. Use
+the arrow keys for the D-pad, **X** for A, **Z** for B, **Enter** for Start
+and **Shift** for Select, or click the buttons on screen. The pet is saved in
+that browser.
+
+To rebuild it after changing the code, run
+`tools/web/build.sh <path to a LovyanGFX checkout>` (it needs Zig:
+`pip install ziglang`, then `ZIG="python3 -m ziglang"`).
+
 ## The handheld
 
 PocketPet runs on the [EspBoy](https://github.com/paixonite/EspBoy)
@@ -148,6 +160,8 @@ All of these numbers are in `PocketPet/config.h`. For example, raise
 - `PocketPet/PocketPet.ino`: controls, sound, clock and saving.
 - `PocketPet/hardware.cpp`: pins, screen, buzzer, battery and sleep for the
   T-Display S3. To use different hardware, rewrite this file.
+- `tools/web/`: the browser version (`web_main.cpp` stands in for the
+  handheld's hardware; `play.html` is the page around it).
 - `tools/host/`: checks that run on a computer, without the handheld:
   - `make -C tools/host test` checks the rules.
   - `make -C tools/host screenshots LGFX=<path to a LovyanGFX checkout>`

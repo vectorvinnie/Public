@@ -299,7 +299,9 @@ int main(int argc, char** argv) {
 
   // --- SELECT puts it to sleep; back after a long weekend ---
   tap(BTN_SELECT);
-  CHECK(sleeps == 2);
+  CHECK(sleeps == 1 && ui.screen == SCR_BYE);  // says bye first...
+  runFor(1600);
+  CHECK(sleeps == 2);                          // ...then sleeps
   wake(60);
   CHECK(!pet.asleep);
   CHECK(pet.food >= OFFLINE_FLOOR - 0.01f && pet.fun >= OFFLINE_FLOOR - 0.01f);
@@ -310,6 +312,7 @@ int main(int argc, char** argv) {
 
   // --- Power switch off and on: the clock is lost but the pet isn't ---
   tap(BTN_SELECT);
+  runFor(1600);
   wake(1, true);
   CHECK(ui.screen == SCR_HOME && pet.hatched);
   CHECK(!ui.clock.valid);
