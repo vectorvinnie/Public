@@ -7,21 +7,18 @@
 #include <stdint.h>
 #include "pet.h"
 
-#if defined(ARDUINO)
-#include <M5GFX.h>
-#else
 #include <LovyanGFX.hpp>
-#endif
 
-#define SCREEN_W 135
-#define SCREEN_H 240
+// Landscape, like a Game Boy turned sideways: D-pad on the left, A/B on the right.
+#define SCREEN_W 320
+#define SCREEN_H 170
 
 #define PET_COLOR_COUNT 6
 extern const char* const PET_COLOR_NAMES[PET_COLOR_COUNT];
 extern const char* const EAR_NAMES[EARS_COUNT];
 
 enum Screen : uint8_t {
-  SCR_EGG,          // first run: tap the egg to hatch it
+  SCR_EGG,          // first run: press A to hatch it
   SCR_PICK_COLOR,
   SCR_PICK_EARS,
   SCR_PICK_NAME,
@@ -32,7 +29,7 @@ enum Screen : uint8_t {
   SCR_INFO,
   SCR_SETTINGS,
   SCR_NEW_EGG,      // hold-to-confirm start over
-  SCR_BYE,          // shown just before switching off
+  SCR_BYE,          // shown just before going to sleep
 };
 
 enum HomeAction : uint8_t {
@@ -40,7 +37,7 @@ enum HomeAction : uint8_t {
   ACT_COUNT
 };
 
-enum FeedChoice : uint8_t { FEED_MEAL, FEED_TREAT, FEED_BACK, FEED_COUNT };
+enum FeedChoice : uint8_t { FEED_MEAL, FEED_TREAT, FEED_COUNT };
 
 enum SettingsItem : uint8_t {
   SET_SCHOOL, SET_SOUND, SET_BRIGHTNESS, SET_AUTO_OFF, SET_BEDTIME, SET_CLOCK,
@@ -50,14 +47,8 @@ enum SettingsItem : uint8_t {
 // Short animations played on the home screen after an action.
 enum Anim : uint8_t {
   ANIM_NONE, ANIM_HELLO, ANIM_MEAL, ANIM_TREAT, ANIM_CLEAN, ANIM_CUDDLE,
-  ANIM_NO, ANIM_LIGHTS, ANIM_HATCH,
+  ANIM_NO, ANIM_HATCH,
 };
-
-// Name picker entries after the 26 letters.
-#define NAME_DONE   26
-#define NAME_DEL    27
-#define NAME_RANDOM 28
-#define NAME_ENTRIES 29
 
 struct UiState {
   Screen screen;
@@ -72,8 +63,8 @@ struct UiState {
   uint8_t eggTaps;
   uint8_t pickColor;
   uint8_t pickEars;
-  char nameBuf[PET_NAME_MAX + 1];
-  uint8_t letter;          // 0..NAME_ENTRIES-1
+  char nameBuf[PET_NAME_MAX + 1];  // one letter per slot, ' ' = empty
+  uint8_t nameCursor;              // slot being changed
   uint8_t clockHour;
   uint8_t clockMinute;
   uint8_t clockField;      // 0 = hour, 1 = minute
@@ -89,7 +80,6 @@ struct UiState {
 
   // Device status for the top bar and settings
   int batteryPercent;      // -1 unknown
-  bool charging;
   PetClock clock;
   uint8_t minute;
   bool soundOn;

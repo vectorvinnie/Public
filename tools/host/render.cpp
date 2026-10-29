@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
   shot("02-pick-color", egg, u, 500);
   u.screen = SCR_PICK_EARS; u.pickColor = 2; u.pickEars = EARS_BUNNY;
   shot("03-pick-style", egg, u, 500);
-  u.screen = SCR_PICK_NAME; strcpy(u.nameBuf, "LUL"); u.letter = 20;
+  u.screen = SCR_PICK_NAME; strcpy(u.nameBuf, "LULU    "); u.nameCursor = 3;
   shot("04-name", egg, u, 100);
   u = baseUi(); u.screen = SCR_SET_CLOCK; u.clockHour = 16; u.clockMinute = 5;
   shot("05-clock", egg, u, 100);
@@ -114,48 +114,55 @@ int main(int argc, char** argv) {
   u = baseUi(); u.cursor = ACT_FEED;
   shot("07-home-hungry", p, u, 500);
 
-  u.screen = SCR_FEED; u.cursor = FEED_MEAL; u.anim = ANIM_MEAL; u.animStart = 0;
+  u.screen = SCR_FEED; u.cursor = FEED_TREAT;
+  shot("08-feed-menu", p, u, 300);
+  u.screen = SCR_HOME; u.cursor = ACT_FEED; u.anim = ANIM_MEAL; u.animStart = 0;
   p.poops = 0;
-  shot("08-eating", p, u, 300);
+  shot("09-eating", p, u, 300);
 
   p = basePet(3, EARS_BUNNY, 80);
   p.poops = 2;
   u = baseUi(); u.cursor = ACT_CLEAN; u.anim = ANIM_CLEAN; u.animStart = 0;
-  shot("09-cleaning", p, u, 700);
+  shot("10-cleaning", p, u, 700);
 
   p = basePet(4, EARS_NONE, 10);
   u = baseUi(); u.cursor = ACT_CUDDLE; u.anim = ANIM_CUDDLE; u.animStart = 0;
-  shot("10-cuddle", p, u, 400);
+  shot("11-cuddle", p, u, 400);
 
   p = basePet(2, EARS_CAT, 50);
   p.asleep = true; p.energy = 40;
   u = baseUi(); u.cursor = ACT_LIGHT; u.clock = {true, 21};
-  shot("11-asleep", p, u, 1234);
+  shot("12-asleep", p, u, 1234);
 
   p = basePet(5, EARS_BEAR, 5);
   u = baseUi(); u.screen = SCR_GAME; u.gameRound = 3; u.gameScore = 2; u.gameGuess = 1;
   u.gameLook = 1; u.gameShownAt = 0;
-  shot("12-game", p, u, 400);
+  shot("13-game", p, u, 400);
 
   p = basePet(0, EARS_BUNNY, 100);
   u = baseUi(); u.screen = SCR_INFO;
-  shot("13-info", p, u, 100);
+  shot("14-info", p, u, 100);
 
   p = basePet(0, EARS_CAT, 3);
   u = baseUi(); u.screen = SCR_SETTINGS; u.cursor = SET_SCHOOL;
-  shot("14-settings", p, u, 100);
+  shot("15-settings", p, u, 100);
 
   p.schoolMode = true;
   u = baseUi();
-  shot("15-school-mode", p, u, 100);
+  shot("16-school-mode", p, u, 100);
 
   p = basePet(1, EARS_CAT, 3);
   u = baseUi(); u.anim = ANIM_NO; u.animStart = 0; strcpy(u.bubble, "I'm full!"); u.bubbleUntil = 2000;
-  shot("16-full", p, u, 150);
+  shot("17-full", p, u, 150);
+
+  u = baseUi(); u.screen = SCR_NEW_EGG; u.holdMs = 1800;
+  shot("18-new-egg", p, u, 100);
+  u.screen = SCR_BYE;
+  shot("19-bye", p, u, 100);
 
   // Everything side by side in one picture.
   int w = SCREEN_W * SCALE, h = SCREEN_H * SCALE, gap = 12;
-  int cols = 8, rows = (shots.size() + cols - 1) / cols;
+  int cols = 4, rows = (shots.size() + cols - 1) / cols;
   int sw = cols * (w + gap) + gap, sh = rows * (h + gap) + gap;
   std::vector<uint8_t> sheet(sw * sh * 3, 70);
   for (size_t i = 0; i < shots.size(); i++) {

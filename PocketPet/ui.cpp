@@ -1,20 +1,19 @@
 #include "ui.h"
 #include "config.h"
-#include "meadow.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 using lgfx::LGFX_Sprite;
 
 // ---------------------------------------------------------------------------
-// Layout (portrait, 135 x 240, front button below the screen)
+// Layout (landscape 320 x 170)
 // ---------------------------------------------------------------------------
-static const int TOP_H = 16;      // name, clock, battery
-static const int STATS_H = 18;    // food / fun / energy bars
-static const int SCENE_Y = TOP_H + STATS_H;
-static const int BAR_Y = 196;     // action bar
-static const int GROUND_Y = 176;  // where the pet's feet are
+static const int TOP_H = 20;      // name, needs, clock, battery
+static const int BAR_Y = 130;     // action bar along the bottom
+static const int GROUND_Y = 122;  // where the pet's feet are
+static const int GRASS_Y = 96;    // where the meadow starts
 static const int CX = SCREEN_W / 2;
 
 const uint8_t AUTO_OFF_MINUTES[3] = {1, 2, 5};
@@ -26,6 +25,7 @@ const uint8_t AUTO_OFF_MINUTES[3] = {1, 2, 5};
 static inline uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) { return lgfx::color565(r, g, b); }
 
 static const uint16_t INK = rgb(60, 40, 50);
+static const uint16_t SOFT_INK = rgb(140, 120, 120);
 static const uint16_t WHITE = rgb(255, 255, 255);
 static const uint16_t CREAM = rgb(255, 248, 235);
 static const uint16_t CREAM_DARK = rgb(235, 220, 200);
@@ -33,6 +33,7 @@ static const uint16_t BLUSH = rgb(255, 150, 170);
 static const uint16_t INNER_EAR = rgb(255, 190, 200);
 static const uint16_t MOUTH = rgb(170, 50, 70);
 static const uint16_t NIGHT = rgb(28, 30, 70);
+static const uint16_t NIGHT_HILL = rgb(36, 60, 80);
 static const uint16_t NIGHT_GRASS = rgb(30, 70, 60);
 static const uint16_t STAR_YELLOW = rgb(255, 220, 90);
 static const uint16_t GOOD = rgb(110, 200, 110);
@@ -41,6 +42,9 @@ static const uint16_t BAD = rgb(240, 100, 100);
 static const uint16_t POOP = rgb(150, 100, 60);
 static const uint16_t POOP_LIGHT = rgb(185, 135, 90);
 static const uint16_t HIGHLIGHT = rgb(255, 120, 170);
+static const uint16_t GRASS = rgb(170, 220, 100);
+static const uint16_t GRASS_DARK = rgb(130, 190, 80);
+static const uint16_t SHADOW = rgb(130, 180, 80);
 
 const char* const PET_COLOR_NAMES[PET_COLOR_COUNT] = {
   "Pink", "Mint", "Lavender", "Sky", "Peach", "Lemon"};
@@ -95,10 +99,19 @@ static void star(LGFX_Sprite& c, int x, int y, int r, uint16_t color) {
   }
 }
 
+// Little arrow heads for "use the D-pad here". dir: 0 up, 1 right, 2 down, 3 left.
+static void arrow(LGFX_Sprite& c, int x, int y, int s, int dir, uint16_t color) {
+  switch (dir) {
+    case 0: c.fillTriangle(x, y - s, x - s, y + s / 2, x + s, y + s / 2, color); break;
+    case 1: c.fillTriangle(x + s, y, x - s / 2, y - s, x - s / 2, y + s, color); break;
+    case 2: c.fillTriangle(x, y + s, x - s, y - s / 2, x + s, y - s / 2, color); break;
+    default: c.fillTriangle(x - s, y, x + s / 2, y - s, x + s / 2, y + s, color); break;
+  }
+}
+
 static void bubbleText(LGFX_Sprite& c, const char* s, int x, int y) {
   c.setFont(&fonts::Font2);
-  int w = c.textWidth(s) + 14;
-  if (w > SCREEN_W - 4) w = SCREEN_W - 4;
+  int w = c.textWidth(s) + 16;
   int left = x - w / 2;
   if (left < 2) left = 2;
   if (left + w > SCREEN_W - 2) left = SCREEN_W - 2 - w;
@@ -114,7 +127,7 @@ static void bubbleText(LGFX_Sprite& c, const char* s, int x, int y) {
 // ---------------------------------------------------------------------------
 enum Icon : uint8_t {
   ICON_RICEBALL, ICON_BALL, ICON_BROOM, ICON_MOON, ICON_HEART, ICON_CHART, ICON_GEAR,
-  ICON_CUPCAKE, ICON_BACK, ICON_APPLE, ICON_STAR, ICON_BOLT, ICON_POOP,
+  ICON_CUPCAKE, ICON_APPLE, ICON_STAR, ICON_BOLT,
 };
 
 static void poop(LGFX_Sprite& c, int x, int y, int s, bool face) {
@@ -129,7 +142,7 @@ static void poop(LGFX_Sprite& c, int x, int y, int s, bool face) {
   }
 }
 
-static void drawIcon(LGFX_Sprite& c, Icon icon, int x, int y, int s) {
+static void drawIcon(LGFX_Sprite& c, Icon icon, int x, int y, int s, uint16_t bg = CREAM) {
   float h = s / 2.0f;
   switch (icon) {
     case ICON_RICEBALL:
@@ -156,7 +169,7 @@ static void drawIcon(LGFX_Sprite& c, Icon icon, int x, int y, int s) {
       break;
     case ICON_MOON:
       c.fillCircle(x, y, h, STAR_YELLOW);
-      c.fillCircle(x + h * 0.45f, y - h * 0.3f, h * 0.8f, CREAM);
+      c.fillCircle(x + h * 0.45f, y - h * 0.3f, h * 0.8f, bg);
       break;
     case ICON_HEART:
       heart(c, x, y - 1, h * 0.75f, HIGHLIGHT);
@@ -172,11 +185,7 @@ static void drawIcon(LGFX_Sprite& c, Icon icon, int x, int y, int s) {
         c.fillCircle(x + cosf(a) * h * 0.8f, y + sinf(a) * h * 0.8f, h * 0.25f + 1, rgb(140, 140, 160));
       }
       c.fillCircle(x, y, h * 0.75f, rgb(140, 140, 160));
-      c.fillCircle(x, y, h * 0.3f, CREAM);
-      break;
-    case ICON_BACK:
-      c.fillTriangle(x - h, y, x, y - h * 0.8f, x, y + h * 0.8f, INK);
-      c.fillRect(x, y - h * 0.3f, h, h * 0.6f + 1, INK);
+      c.fillCircle(x, y, h * 0.3f, bg);
       break;
     case ICON_APPLE:
       c.fillCircle(x - h * 0.3f, y + 1, h * 0.6f, rgb(235, 70, 70));
@@ -192,9 +201,6 @@ static void drawIcon(LGFX_Sprite& c, Icon icon, int x, int y, int s) {
                      rgb(90, 170, 250));
       c.fillTriangle(x - h * 0.3f, y + h, x + h * 0.6f, y - h * 0.15f, x - h * 0.05f, y - h * 0.15f,
                      rgb(90, 170, 250));
-      break;
-    case ICON_POOP:
-      poop(c, x, y + h, s, false);
       break;
   }
 }
@@ -218,9 +224,9 @@ struct PetLook {
 
 static int petSize(PetStage s) {
   switch (s) {
-    case STAGE_BABY: return 19;
-    case STAGE_KID: return 24;
-    default: return 28;
+    case STAGE_BABY: return 21;
+    case STAGE_KID: return 26;
+    default: return 30;
   }
 }
 
@@ -229,7 +235,7 @@ static void fillTri(LGFX_Sprite& c, float x0, float y0, float x1, float y1, floa
   c.fillTriangle((int)x0, (int)y0, (int)x1, (int)y1, (int)x2, (int)y2, color);
 }
 
-// Shrink a triangle toward its middle (for outlines and inner ears).
+// Shrink a triangle toward its middle (for inner ears).
 static void triInset(float* x, float* y, float k) {
   float mx = (x[0] + x[1] + x[2]) / 3, my = (y[0] + y[1] + y[2]) / 3;
   for (int i = 0; i < 3; i++) { x[i] = mx + (x[i] - mx) * k; y[i] = my + (y[i] - my) * k; }
@@ -304,7 +310,7 @@ static void drawEyes(LGFX_Sprite& c, const PetLook& p, const Palette& pal, int c
         c.fillCircle(x - rx / 3, ey - ry / 3, rx / 2 > 1 ? rx / 2 : 1, WHITE);
         break;
     }
-    if (f == FACE_SAD) {  // worried eyebrows
+    if (f == FACE_SAD) {  // worried eyebrows, inner ends up
       c.drawWideLine(x - side * rx * 1.0f, ey - ry * 2.3f, x + side * rx * 0.9f, ey - ry * 1.7f, 1, INK);
     }
   }
@@ -340,7 +346,8 @@ static void drawMouth(LGFX_Sprite& c, const PetLook& p, int cx, int my, int s) {
 }
 
 // cx = middle, gy = ground under the feet. `bob` squashes the body a little.
-static void drawPet(LGFX_Sprite& c, const PetLook& p, int cx, int gy, float bob, uint32_t ms) {
+static void drawPet(LGFX_Sprite& c, const PetLook& p, int cx, int gy, float bob, uint32_t ms,
+                    uint16_t shadow = SHADOW) {
   Palette pal = petPalette(p.color);
   int s = petSize(p.stage);
   int w = s + (int)bob;                // half width
@@ -348,9 +355,7 @@ static void drawPet(LGFX_Sprite& c, const PetLook& p, int cx, int gy, float bob,
   int cy = gy - h - 2;
   int top = cy - h;
 
-  // shadow
-  c.fillEllipse(cx, gy, s * 0.8f, 3, rgb(120, 150, 70));
-
+  c.fillEllipse(cx, gy, s * 0.8f, 3, shadow);
   drawEars(c, p, pal, cx, top, s);
 
   // feet
@@ -380,28 +385,73 @@ static void drawPet(LGFX_Sprite& c, const PetLook& p, int cx, int gy, float bob,
 }
 
 // ---------------------------------------------------------------------------
-// Scene pieces
+// The meadow (drawn from shapes, so it fits any screen)
 // ---------------------------------------------------------------------------
-static void drawMeadow(LGFX_Sprite& c, int y) {
-  c.pushImage(0, y, MEADOW_W, MEADOW_H, MEADOW);
+static void cloud(LGFX_Sprite& c, int x, int y) {
+  c.fillCircle(x, y, 9, WHITE);
+  c.fillCircle(x + 11, y - 5, 11, WHITE);
+  c.fillCircle(x + 24, y, 9, WHITE);
+  c.fillRect(x, y, 25, 9, WHITE);
 }
 
-static void drawNight(LGFX_Sprite& c, uint32_t ms) {
-  c.fillRect(0, SCENE_Y, SCREEN_W, BAR_Y - SCENE_Y, NIGHT);
-  c.fillRect(0, GROUND_Y - 20, SCREEN_W, BAR_Y - GROUND_Y + 20, NIGHT_GRASS);
-  static const uint8_t sx[] = {12, 40, 70, 25, 100, 120, 58, 88, 8, 112};
-  static const uint8_t sy[] = {48, 60, 44, 90, 80, 52, 104, 120, 118, 128};
-  for (int i = 0; i < 10; i++) {
-    bool twinkle = ((ms / 400) + i * 3) % 7 == 0;
-    c.fillCircle(sx[i], sy[i], twinkle ? 2 : 1, STAR_YELLOW);
+static void tree(LGFX_Sprite& c, int x, int y, bool night) {
+  c.fillRect(x - 3, y - 16, 7, 18, night ? rgb(60, 50, 60) : rgb(150, 100, 60));
+  uint16_t leaf = night ? rgb(30, 80, 70) : rgb(80, 170, 90);
+  uint16_t leafLight = night ? rgb(40, 95, 80) : rgb(110, 195, 110);
+  c.fillCircle(x - 9, y - 22, 11, leaf);
+  c.fillCircle(x + 9, y - 22, 11, leaf);
+  c.fillCircle(x, y - 34, 13, leaf);
+  c.fillCircle(x - 3, y - 36, 6, leafLight);
+}
+
+static void drawScene(LGFX_Sprite& c, int top, int bottom, bool night, uint32_t ms) {
+  // sky
+  for (int y = top; y < GRASS_Y; y += 4) {
+    float t = (float)(y - top) / (GRASS_Y - top);
+    uint16_t col = night ? rgb(20 + 20 * t, 22 + 20 * t, 60 + 25 * t)
+                         : rgb(140 + 60 * t, 205 + 30 * t, 250);
+    c.fillRect(0, y, SCREEN_W, 4, col);
   }
-  c.fillCircle(108, 62, 12, STAR_YELLOW);
-  c.fillCircle(115, 56, 11, NIGHT);
+  if (night) {
+    static const uint16_t sx[] = {20, 60, 105, 140, 190, 230, 262, 300, 85, 210, 35, 165};
+    static const uint8_t sy[] = {30, 52, 34, 60, 28, 50, 70, 40, 72, 76, 66, 44};
+    for (int i = 0; i < 12; i++) {
+      if (sy[i] < top + 2) continue;
+      bool twinkle = ((ms / 400) + i * 3) % 7 == 0;
+      c.fillCircle(sx[i], sy[i], twinkle ? 2 : 1, STAR_YELLOW);
+    }
+    c.fillCircle(280, top + 22, 12, STAR_YELLOW);
+    c.fillCircle(287, top + 16, 11, rgb(24, 26, 64));
+  } else {
+    c.fillCircle(285, top + 22, 13, rgb(255, 235, 140));
+    c.fillCircle(285, top + 22, 10, rgb(255, 215, 90));
+    int drift = ms / 250;
+    cloud(c, (40 + drift) % (SCREEN_W + 60) - 40, top + 22);
+    cloud(c, (190 + drift / 2) % (SCREEN_W + 60) - 40, top + 40);
+  }
+
+  // hills and trees
+  c.fillEllipse(70, GRASS_Y + 10, 120, 30, night ? NIGHT_HILL : rgb(150, 210, 120));
+  c.fillEllipse(270, GRASS_Y + 14, 130, 34, night ? rgb(32, 55, 74) : rgb(135, 200, 110));
+  tree(c, 34, GRASS_Y + 4, night);
+  tree(c, 290, GRASS_Y + 6, night);
+
+  // grass with a few tufts
+  c.fillRect(0, GRASS_Y + 4, SCREEN_W, bottom - GRASS_Y - 4, night ? NIGHT_GRASS : GRASS);
+  static const uint16_t tx[] = {14, 52, 96, 128, 200, 236, 272, 306, 70, 250};
+  static const uint8_t ty[] = {110, 124, 106, 132, 112, 128, 116, 104, 120, 106};
+  uint16_t tuft = night ? rgb(40, 90, 70) : GRASS_DARK;
+  for (int i = 0; i < 10; i++) {
+    if (ty[i] >= bottom - 2) continue;
+    c.drawLine(tx[i], ty[i], tx[i] - 3, ty[i] - 5, tuft);
+    c.drawLine(tx[i], ty[i], tx[i], ty[i] - 6, tuft);
+    c.drawLine(tx[i], ty[i], tx[i] + 3, ty[i] - 5, tuft);
+  }
 }
 
 static void drawPoops(LGFX_Sprite& c, int count, int hideRightOf, uint32_t ms) {
-  static const int px[] = {20, 116, 40};
-  static const int py[] = {GROUND_Y - 4, GROUND_Y + 6, GROUND_Y + 14};
+  static const int px[] = {84, 236, 108};
+  static const int py[] = {GROUND_Y - 2, GROUND_Y + 2, GROUND_Y + 6};
   for (int i = 0; i < count && i < 3; i++) {
     if (px[i] > hideRightOf) continue;
     poop(c, px[i], py[i], 16, true);
@@ -415,7 +465,7 @@ static void drawPoops(LGFX_Sprite& c, int count, int hideRightOf, uint32_t ms) {
 }
 
 static void drawThought(LGFX_Sprite& c, PetNeed need, int x, int y) {
-  Icon icon = ICON_APPLE;
+  Icon icon;
   switch (need) {
     case NEED_FOOD: icon = ICON_APPLE; break;
     case NEED_FUN: icon = ICON_BALL; break;
@@ -423,91 +473,102 @@ static void drawThought(LGFX_Sprite& c, PetNeed need, int x, int y) {
     case NEED_CLEAN: icon = ICON_BROOM; break;
     default: return;
   }
-  c.fillCircle(x - 14, y + 18, 2, WHITE);
-  c.fillCircle(x - 9, y + 12, 3, WHITE);
-  c.fillCircle(x, y, 13, INK);
-  c.fillCircle(x, y, 12, WHITE);
-  if (icon == ICON_MOON) {
-    c.fillCircle(x, y, 7, STAR_YELLOW);
-    c.fillCircle(x + 4, y - 3, 6, WHITE);
-  } else {
-    drawIcon(c, icon, x, y, 14);
-  }
+  c.fillCircle(x - 16, y + 18, 2, WHITE);
+  c.fillCircle(x - 10, y + 12, 3, WHITE);
+  c.fillCircle(x, y, 14, INK);
+  c.fillCircle(x, y, 13, WHITE);
+  drawIcon(c, icon, x, y, 15, WHITE);
 }
 
 static void drawZzz(LGFX_Sprite& c, int x, int y, uint32_t ms) {
   for (int i = 0; i < 3; i++) {
     int t = (ms / 30 + i * 33) % 100;  // 0..99 rise
-    int zx = x + t / 6 + i * 2;
-    int zy = y - t / 3;
-    text(c, "z", zx, zy, WHITE, i == 1 ? &fonts::Font4 : &fonts::Font2);
+    text(c, "z", x + t / 5 + i * 2, y - t / 3, WHITE, i == 1 ? &fonts::Font4 : &fonts::Font2);
   }
 }
 
-static void drawTopBars(LGFX_Sprite& c, const PetState& pet, const UiState& ui, uint32_t ms) {
-  c.fillRect(0, 0, SCREEN_W, SCENE_Y, CREAM);
-  c.drawFastHLine(0, SCENE_Y - 1, SCREEN_W, CREAM_DARK);
-
-  text(c, pet.name, 4, 8, INK, &fonts::Font2, lgfx::middle_left);
-
-  // battery
-  int bx = SCREEN_W - 22, by = 3;
-  int pct = ui.batteryPercent;
+static void drawBattery(LGFX_Sprite& c, int pct, int bx, int by, uint32_t ms) {
   bool low = pct >= 0 && pct < 15;
-  if (!low || blinkOn(ms, 1000, 600)) {
-    uint16_t edge = low ? BAD : INK;
-    c.drawRoundRect(bx, by, 17, 9, 2, edge);
-    c.fillRect(bx + 17, by + 3, 2, 3, edge);
-    if (pct >= 0) c.fillRect(bx + 2, by + 2, 13 * pct / 100 + 1, 5, low ? BAD : GOOD);
-    if (ui.charging) {
-      c.fillTriangle(bx + 9, by + 1, bx + 5, by + 5, bx + 9, by + 5, MEH);
-      c.fillTriangle(bx + 8, by + 8, bx + 12, by + 4, bx + 8, by + 4, MEH);
-    }
-  }
+  if (low && !blinkOn(ms, 1000, 600)) return;
+  uint16_t edge = low ? BAD : INK;
+  c.drawRoundRect(bx, by, 19, 10, 2, edge);
+  c.fillRect(bx + 19, by + 3, 2, 4, edge);
+  if (pct >= 0) c.fillRect(bx + 2, by + 2, 15 * pct / 100 + 1, 6, low ? BAD : GOOD);
+}
 
-  if (ui.clock.valid) {
-    char buf[8];
-    snprintf(buf, sizeof(buf), "%d:%02d", ui.clock.hour, ui.minute);
-    text(c, buf, bx - 4, 8, rgb(140, 120, 120), &fonts::Font0, lgfx::middle_right);
-  }
+static void drawTopBar(LGFX_Sprite& c, const PetState& pet, const UiState& ui, uint32_t ms) {
+  c.fillRect(0, 0, SCREEN_W, TOP_H, CREAM);
+  c.drawFastHLine(0, TOP_H - 1, SCREEN_W, CREAM_DARK);
+  text(c, pet.name, 6, TOP_H / 2, INK, &fonts::Font2, lgfx::middle_left);
 
   // food / fun / energy
   const float vals[3] = {pet.food, pet.fun, pet.energy};
   const Icon icons[3] = {ICON_APPLE, ICON_STAR, ICON_BOLT};
   for (int i = 0; i < 3; i++) {
-    int x = 2 + i * 45;
-    int y = TOP_H + STATS_H / 2 - 1;
-    drawIcon(c, icons[i], x + 6, y, 11);
+    int x = 86 + i * 54;
+    int y = TOP_H / 2;
+    drawIcon(c, icons[i], x, y, 12);
     int v = (int)(vals[i] + 0.5f);
     uint16_t col = v > 50 ? GOOD : (v > NEED_LOW ? MEH : BAD);
-    c.drawRoundRect(x + 13, y - 4, 28, 9, 3, CREAM_DARK);
-    if (v > 0) c.fillRoundRect(x + 14, y - 3, 26 * v / 100 + 1, 7, 2, col);
+    c.drawRoundRect(x + 9, y - 5, 34, 10, 3, CREAM_DARK);
+    if (v > 0) c.fillRoundRect(x + 10, y - 4, 32 * v / 100 + 1, 8, 2, col);
+  }
+
+  char buf[8];
+  if (ui.clock.valid) snprintf(buf, sizeof(buf), "%d:%02d", ui.clock.hour, ui.minute);
+  else strcpy(buf, "--:--");
+  text(c, buf, SCREEN_W - 30, TOP_H / 2, SOFT_INK, &fonts::Font2, lgfx::middle_right);
+  drawBattery(c, ui.batteryPercent, SCREEN_W - 25, 5, ms);
+}
+
+static void drawBarBackground(LGFX_Sprite& c) {
+  c.fillRect(0, BAR_Y, SCREEN_W, SCREEN_H - BAR_Y, CREAM);
+  c.drawFastHLine(0, BAR_Y, SCREEN_W, CREAM_DARK);
+}
+
+// A row of icons; the selected one is boxed and labelled.
+static void drawIconBar(LGFX_Sprite& c, const Icon* icons, const char* const* labels, int count,
+                        int sel, int attention) {
+  drawBarBackground(c);
+  float slot = (float)SCREEN_W / count;
+  for (int i = 0; i < count; i++) {
+    int x = (int)(slot * i + slot / 2);
+    if (i == sel) {
+      c.fillRoundRect(x - slot / 2 + 3, BAR_Y + 3, slot - 6, SCREEN_H - BAR_Y - 6, 8,
+                      i == attention ? rgb(255, 225, 235) : WHITE);
+      c.drawRoundRect(x - slot / 2 + 3, BAR_Y + 3, slot - 6, SCREEN_H - BAR_Y - 6, 8, HIGHLIGHT);
+      drawIcon(c, icons[i], x, BAR_Y + 15, 17, i == attention ? rgb(255, 225, 235) : WHITE);
+      text(c, labels[i], x, BAR_Y + 31, INK, &fonts::Font0);
+    } else {
+      drawIcon(c, icons[i], x, BAR_Y + 20, 17);
+      if (i == attention) c.fillCircle(x + 10, BAR_Y + 8, 3, HIGHLIGHT);
+    }
   }
 }
 
-// A bar with the selected item big in the middle and its neighbours small.
-static void drawChoiceBar(LGFX_Sprite& c, const Icon* icons, const char* const* labels, int count,
-                          int sel, bool attention) {
-  c.fillRect(0, BAR_Y, SCREEN_W, SCREEN_H - BAR_Y, CREAM);
-  c.drawFastHLine(0, BAR_Y, SCREEN_W, CREAM_DARK);
-  int prev = (sel + count - 1) % count, next = (sel + 1) % count;
+static void drawHint(LGFX_Sprite& c, const char* line1, const char* line2) {
+  drawBarBackground(c);
+  if (line2) {
+    text(c, line1, CX, BAR_Y + 12, INK);
+    text(c, line2, CX, BAR_Y + 28, SOFT_INK);
+  } else {
+    text(c, line1, CX, BAR_Y + 20, INK);
+  }
+}
 
-  c.fillRoundRect(CX - 17, BAR_Y + 3, 34, 24, 8, attention ? rgb(255, 225, 235) : WHITE);
-  c.drawRoundRect(CX - 17, BAR_Y + 3, 34, 24, 8, HIGHLIGHT);
-  drawIcon(c, icons[sel], CX, BAR_Y + 15, 18);
-  drawIcon(c, icons[prev], 18, BAR_Y + 15, 12);
-  drawIcon(c, icons[next], SCREEN_W - 18, BAR_Y + 15, 12);
-  c.fillTriangle(SCREEN_W - 4, BAR_Y + 15, SCREEN_W - 8, BAR_Y + 11, SCREEN_W - 8, BAR_Y + 19,
-                 CREAM_DARK);
-  text(c, labels[sel], CX, BAR_Y + 35, INK);
+static void drawTitle(LGFX_Sprite& c, const char* title, const char* hint = nullptr) {
+  c.fillRect(0, 0, SCREEN_W, TOP_H + 2, CREAM);
+  c.drawFastHLine(0, TOP_H + 2, SCREEN_W, CREAM_DARK);
+  text(c, title, 8, TOP_H / 2 + 1, INK, &fonts::Font2, lgfx::middle_left);
+  if (hint) text(c, hint, SCREEN_W - 8, TOP_H / 2 + 1, SOFT_INK, &fonts::Font2, lgfx::middle_right);
 }
 
 static const Icon HOME_ICONS[ACT_COUNT] = {
   ICON_RICEBALL, ICON_BALL, ICON_BROOM, ICON_MOON, ICON_HEART, ICON_CHART, ICON_GEAR};
 static const char* const HOME_LABELS[ACT_COUNT] = {
-  "Feed", "Play", "Clean", "Lights", "Cuddle", "How am I?", "Settings"};
-static const Icon FEED_ICONS[FEED_COUNT] = {ICON_RICEBALL, ICON_CUPCAKE, ICON_BACK};
-static const char* const FEED_LABELS[FEED_COUNT] = {"Meal", "Treat", "Back"};
+  "Feed", "Play", "Clean", "Lights", "Cuddle", "Stats", "Setup"};
+static const Icon FEED_ICONS[FEED_COUNT] = {ICON_RICEBALL, ICON_CUPCAKE};
+static const char* const FEED_LABELS[FEED_COUNT] = {"Meal", "Treat"};
 
 static Face faceForMood(PetMood m) {
   switch (m) {
@@ -530,24 +591,24 @@ static PetLook lookFor(const PetState& pet) {
   return p;
 }
 
+static int headY(PetStage stage) { return GROUND_Y - petSize(stage) * 2 - 6; }
+
 // ---------------------------------------------------------------------------
 // Screens
 // ---------------------------------------------------------------------------
 static void screenHome(LGFX_Sprite& c, const PetState& pet, const UiState& ui, uint32_t ms) {
   PetMood mood = petMood(pet);
-  bool night = pet.asleep && ui.anim != ANIM_LIGHTS;
   uint32_t t = ms - ui.animStart;
   Anim anim = ui.anim;
 
-  if (night) drawNight(c, ms);
-  else drawMeadow(c, SCENE_Y - 26);
+  drawScene(c, TOP_H, BAR_Y, pet.asleep, ms);
 
   PetLook look = lookFor(pet);
   int x = CX;
   float bob = mood == MOOD_ASLEEP ? sinf(ms / 700.0f) * 1.5f : sinf(ms / 260.0f) * 1.2f;
   int hop = 0;
-
   int broomX = SCREEN_W + 40;
+
   switch (anim) {
     case ANIM_HELLO:
       look.face = FACE_HAPPY;
@@ -570,100 +631,89 @@ static void screenHome(LGFX_Sprite& c, const PetState& pet, const UiState& ui, u
       look.face = FACE_SAD;
       x += (int)(sinf(t / 60.0f) * 4);
       break;
-    case ANIM_LIGHTS:
-      look.face = FACE_SLEEP;
-      break;
     default:
       break;
   }
 
   drawPoops(c, pet.poops, broomX, ms);
-  drawPet(c, look, x, GROUND_Y - hop, bob, ms);
+  drawPet(c, look, x, GROUND_Y - hop, bob, ms, pet.asleep ? rgb(25, 60, 50) : SHADOW);
 
   int s = petSize(look.stage);
-  int headY = GROUND_Y - s * 2 - 6;
+  int hy = headY(look.stage);
 
   if (anim == ANIM_MEAL || anim == ANIM_TREAT) {
     int bite = t / 450;  // 0..3
     if (bite < 3) {
-      int size = 20 - bite * 5;
-      drawIcon(c, anim == ANIM_MEAL ? ICON_RICEBALL : ICON_CUPCAKE, x + s + 12, GROUND_Y - s,
-               size);
+      drawIcon(c, anim == ANIM_MEAL ? ICON_RICEBALL : ICON_CUPCAKE, x + s + 14, GROUND_Y - s,
+               22 - bite * 5);
     }
   }
   if (anim == ANIM_CLEAN && broomX < SCREEN_W + 10) {
     c.drawWideLine(broomX + 14, GROUND_Y - 34, broomX + 2, GROUND_Y - 6, 2, rgb(150, 100, 60));
-    c.fillTriangle(broomX + 3, GROUND_Y - 8, broomX - 10, GROUND_Y + 10, broomX + 14, GROUND_Y + 10,
+    c.fillTriangle(broomX + 3, GROUND_Y - 8, broomX - 10, GROUND_Y + 8, broomX + 14, GROUND_Y + 8,
                    rgb(240, 200, 80));
   }
   if (anim == ANIM_CLEAN && t > 1200) {
-    for (int i = 0; i < 5; i++) star(c, 15 + i * 26, GROUND_Y - 6 - (i % 2) * 14, 4, WHITE);
+    for (int i = 0; i < 7; i++) star(c, 30 + i * 44, GROUND_Y - 8 - (i % 2) * 16, 4, WHITE);
   }
   if (anim == ANIM_CUDDLE) {
     for (int i = 0; i < 3; i++) {
       int rise = (int)((t + i * 300) % 900) / 12;
-      heart(c, x - 22 + i * 22, headY + 6 - rise, 5, HIGHLIGHT);
+      heart(c, x - 26 + i * 26, hy + 8 - rise, 5, HIGHLIGHT);
     }
   }
 
-  if (mood == MOOD_ASLEEP && anim == ANIM_NONE) drawZzz(c, x + s - 2, headY + 4, ms);
+  if (mood == MOOD_ASLEEP && anim == ANIM_NONE) drawZzz(c, x + s, hy + 6, ms);
   if (mood == MOOD_PAUSED) {
-    c.fillRoundRect(10, SCENE_Y + 6, SCREEN_W - 20, 38, 8, WHITE);
-    c.drawRoundRect(10, SCENE_Y + 6, SCREEN_W - 20, 38, 8, HIGHLIGHT);
-    text(c, "School mode", CX, SCENE_Y + 17, INK);
-    text(c, "see you later!", CX, SCENE_Y + 33, rgb(140, 120, 120));
+    c.fillRoundRect(CX - 80, TOP_H + 6, 160, 38, 8, WHITE);
+    c.drawRoundRect(CX - 80, TOP_H + 6, 160, 38, 8, HIGHLIGHT);
+    text(c, "School mode", CX, TOP_H + 17, INK);
+    text(c, "see you later!", CX, TOP_H + 33, SOFT_INK);
   }
 
   if (ui.bubble[0] && (int32_t)(ui.bubbleUntil - ms) > 0) {
-    bubbleText(c, ui.bubble, x, headY - 16);
+    bubbleText(c, ui.bubble, x, hy - 14);
   } else if (anim == ANIM_NONE) {
     PetNeed need = petNeed(pet);
-    if (need != NEED_NONE && blinkOn(ms, 3000, 2000)) drawThought(c, need, x + s + 14, headY - 6);
+    if (need != NEED_NONE && blinkOn(ms, 3000, 2000)) drawThought(c, need, x + s + 22, hy - 4);
   }
 
-  drawTopBars(c, pet, ui, ms);
+  drawTopBar(c, pet, ui, ms);
   if (ui.screen == SCR_FEED) {
-    drawChoiceBar(c, FEED_ICONS, FEED_LABELS, FEED_COUNT, ui.cursor, false);
+    // Two big choices in the middle of the bar.
+    drawBarBackground(c);
+    for (int i = 0; i < FEED_COUNT; i++) {
+      int bx = CX - 50 + i * 100;
+      bool sel = i == ui.cursor;
+      c.fillRoundRect(bx - 44, BAR_Y + 3, 88, SCREEN_H - BAR_Y - 6, 8, sel ? WHITE : CREAM);
+      if (sel) c.drawRoundRect(bx - 44, BAR_Y + 3, 88, SCREEN_H - BAR_Y - 6, 8, HIGHLIGHT);
+      drawIcon(c, FEED_ICONS[i], bx - 22, BAR_Y + 20, 18, sel ? WHITE : CREAM);
+      text(c, FEED_LABELS[i], bx + 8, BAR_Y + 20, sel ? INK : SOFT_INK, &fonts::Font2,
+           lgfx::middle_left);
+    }
+    arrow(c, 14, BAR_Y + 20, 5, 3, CREAM_DARK);
+    arrow(c, SCREEN_W - 14, BAR_Y + 20, 5, 1, CREAM_DARK);
   } else {
     PetNeed need = petNeed(pet);
-    bool attention = (need == NEED_FOOD && ui.cursor == ACT_FEED) ||
-                     (need == NEED_FUN && ui.cursor == ACT_PLAY) ||
-                     (need == NEED_SLEEP && ui.cursor == ACT_LIGHT) ||
-                     (need == NEED_CLEAN && ui.cursor == ACT_CLEAN);
-    drawChoiceBar(c, HOME_ICONS, HOME_LABELS, ACT_COUNT, ui.cursor, attention);
+    int attention = need == NEED_FOOD ? ACT_FEED : need == NEED_FUN ? ACT_PLAY
+                  : need == NEED_SLEEP ? ACT_LIGHT : need == NEED_CLEAN ? ACT_CLEAN : -1;
+    drawIconBar(c, HOME_ICONS, HOME_LABELS, ACT_COUNT, ui.cursor, attention);
   }
-}
-
-static void drawHint(LGFX_Sprite& c, const char* line1, const char* line2) {
-  c.fillRect(0, BAR_Y, SCREEN_W, SCREEN_H - BAR_Y, CREAM);
-  c.drawFastHLine(0, BAR_Y, SCREEN_W, CREAM_DARK);
-  text(c, line1, CX, BAR_Y + 13, INK);
-  if (line2) text(c, line2, CX, BAR_Y + 31, rgb(140, 120, 120));
-}
-
-static void drawTitle(LGFX_Sprite& c, const char* title) {
-  c.fillRect(0, 0, SCREEN_W, 26, CREAM);
-  c.drawFastHLine(0, 26, SCREEN_W, CREAM_DARK);
-  text(c, title, CX, 13, INK);
 }
 
 static void screenEgg(LGFX_Sprite& c, const UiState& ui, uint32_t ms) {
-  drawMeadow(c, 0);
   uint32_t t = ms - ui.animStart;
+  if (ui.anim == ANIM_HATCH && t > 300) {  // white flash
+    c.fillRect(0, 0, SCREEN_W, SCREEN_H, WHITE);
+    star(c, CX, 78, 10 + t / 18, STAR_YELLOW);
+    return;
+  }
+  drawScene(c, 0, BAR_Y, false, ms);
   int wob = 0;
   if (ui.anim == ANIM_HATCH || (ms % 2000) < 400) wob = (int)(sinf(ms / 50.0f) * 3);
-  int ex = CX + wob, ey = 140;
+  int ex = CX + wob, ey = 92;
 
-  if (ui.anim == ANIM_HATCH) {
-    // white flash that fades into the colour picker
-    if (t > 300) {
-      c.fillRect(0, 0, SCREEN_W, SCREEN_H, WHITE);
-      star(c, CX, ey, 10 + t / 20, STAR_YELLOW);
-      return;
-    }
-  }
-
-  c.fillEllipse(CX, ey + 34, 26, 4, rgb(120, 150, 70));
+  c.fillEllipse(CX, ey + 34, 26, 4, SHADOW);
   c.fillEllipse(ex, ey, 28, 36, INK);
   c.fillEllipse(ex, ey, 26, 34, rgb(255, 250, 235));
   c.fillCircle(ex - 10, ey - 12, 5, rgb(255, 180, 200));
@@ -681,87 +731,84 @@ static void screenEgg(LGFX_Sprite& c, const UiState& ui, uint32_t ms) {
     c.drawLine(ex + 8, ey + 4, ex + 20, ey - 5, INK);
   }
 
-  bubbleText(c, taps == 0 ? "An egg!" : (taps == 1 ? "It moved!" : "Almost..."), CX, 80);
-  drawHint(c, "Press A to hatch", "(the big button)");
+  bubbleText(c, taps == 0 ? "An egg!" : (taps == 1 ? "It moved!" : "Almost..."), CX, 28);
+  drawHint(c, "Press A to hatch!", nullptr);
 }
 
 static void screenPick(LGFX_Sprite& c, const UiState& ui, uint32_t ms, bool colors) {
-  drawMeadow(c, 0);
-  drawTitle(c, colors ? "Pick a color" : "Pick a style");
+  drawScene(c, TOP_H, BAR_Y, false, ms);
+  drawTitle(c, colors ? "Pick a color" : "Pick a style", colors ? "1 of 3" : "2 of 3");
   PetLook p = {};
   p.color = ui.pickColor;
   p.ears = ui.pickEars;
   p.stage = STAGE_KID;
   p.face = FACE_HAPPY;
-  drawPet(c, p, CX, GROUND_Y - 10, sinf(ms / 260.0f) * 1.2f, ms);
-  bubbleText(c, colors ? PET_COLOR_NAMES[ui.pickColor] : EAR_NAMES[ui.pickEars], CX, 66);
-  drawHint(c, "B: next one", "A: choose");
+  drawPet(c, p, CX, GROUND_Y, sinf(ms / 260.0f) * 1.2f, ms);
+  int pulse = blinkOn(ms, 800, 400) ? 2 : 0;
+  arrow(c, CX - 70 - pulse, GROUND_Y - 28, 9, 3, WHITE);
+  arrow(c, CX + 70 + pulse, GROUND_Y - 28, 9, 1, WHITE);
+  bubbleText(c, colors ? PET_COLOR_NAMES[ui.pickColor] : EAR_NAMES[ui.pickEars], CX,
+             headY(STAGE_KID) - 14);
+  drawHint(c, "Left / Right: change", colors ? "A: choose" : "A: choose    B: go back");
 }
 
-static void screenName(LGFX_Sprite& c, const PetState& pet, const UiState& ui, uint32_t ms) {
+static void screenName(LGFX_Sprite& c, const UiState& ui, uint32_t ms) {
   c.fillRect(0, 0, SCREEN_W, SCREEN_H, CREAM);
-  drawTitle(c, "Name your pet");
+  drawTitle(c, "Name your pet", "3 of 3");
 
   PetLook p = {};
   p.color = ui.pickColor;
   p.ears = ui.pickEars;
   p.stage = STAGE_BABY;
-  p.face = FACE_NORMAL;
-  drawPet(c, p, CX, 86, 0, ms);
+  drawPet(c, p, 46, 112, 0, ms, CREAM_DARK);
 
-  // the name so far, with a blinking cursor
-  char shown[PET_NAME_MAX + 2];
-  snprintf(shown, sizeof(shown), "%s%s", ui.nameBuf,
-           strlen(ui.nameBuf) < PET_NAME_MAX && blinkOn(ms, 800, 400) ? "_" : "");
-  c.fillRoundRect(8, 96, SCREEN_W - 16, 28, 6, WHITE);
-  text(c, shown, CX, 110, INK, &fonts::Font4);
-
-  // letter wheel
-  auto label = [](int i, char* buf) -> const char* {
-    if (i < 26) { buf[0] = 'A' + i; buf[1] = 0; return buf; }
-    if (i == NAME_DONE) return "DONE";
-    if (i == NAME_DEL) return "DEL";
-    return "RANDOM";
-  };
-  char b0[2], b1[2], b2[2];
-  int cur = ui.letter, prev = (cur + NAME_ENTRIES - 1) % NAME_ENTRIES, next = (cur + 1) % NAME_ENTRIES;
-  auto font = [](int i) -> const lgfx::IFont* {
-    return i < 26 ? (const lgfx::IFont*)&fonts::Font4 : (const lgfx::IFont*)&fonts::Font0;
-  };
-  text(c, label(prev, b0), 22, 158, CREAM_DARK, font(prev));
-  text(c, label(next, b2), SCREEN_W - 22, 158, CREAM_DARK, font(next));
-  c.fillRoundRect(CX - 26, 140, 52, 36, 8, WHITE);
-  c.drawRoundRect(CX - 26, 140, 52, 36, 8, HIGHLIGHT);
-  text(c, label(cur, b1), CX, 158, INK, cur < 26 ? font(cur) : &fonts::Font2);
-
-  (void)pet;
-  drawHint(c, "B: next  PWR: back", "A: pick this");
+  // Eight letter slots; the one being changed has arrows above and below.
+  const int boxW = 24, gap = 3, left = 96, y = 78;
+  for (int i = 0; i < PET_NAME_MAX; i++) {
+    int x = left + i * (boxW + gap);
+    bool cur = i == ui.nameCursor;
+    c.fillRoundRect(x, y - 17, boxW, 34, 5, cur ? WHITE : rgb(250, 240, 225));
+    if (cur) c.drawRoundRect(x, y - 17, boxW, 34, 5, HIGHLIGHT);
+    char ch[2] = {ui.nameBuf[i], 0};
+    if (ch[0] != ' ') text(c, ch, x + boxW / 2, y + 1, INK, &fonts::Font4);
+    else c.drawFastHLine(x + 6, y + 10, boxW - 12, CREAM_DARK);
+    if (cur) {
+      int pulse = blinkOn(ms, 800, 400) ? 1 : 0;
+      arrow(c, x + boxW / 2, y - 26 - pulse, 5, 0, HIGHLIGHT);
+      arrow(c, x + boxW / 2, y + 26 + pulse, 5, 2, HIGHLIGHT);
+    }
+  }
+  drawHint(c, "Up/Down: letter   Left/Right: move", "A: done   B: erase   SELECT: surprise");
 }
 
 static void screenClock(LGFX_Sprite& c, const UiState& ui, uint32_t ms) {
   c.fillRect(0, 0, SCREEN_W, SCREEN_H, CREAM);
-  drawTitle(c, "What time is it?");
-  drawIcon(c, ICON_MOON, CX, 62, 26);
+  drawTitle(c, "What time is it?", "24-hour clock");
+  drawIcon(c, ICON_MOON, 40, 78, 30);
 
   char hh[4], mm[4];
   snprintf(hh, sizeof(hh), "%02d", ui.clockHour);
   snprintf(mm, sizeof(mm), "%02d", ui.clockMinute);
-  int y = 120;
+  int y = 78;
   for (int f = 0; f < 2; f++) {
-    int x = f == 0 ? CX - 30 : CX + 30;
+    int x = f == 0 ? CX - 36 : CX + 36;
     bool active = ui.clockField == f;
-    c.fillRoundRect(x - 24, y - 20, 48, 40, 8, active ? WHITE : CREAM);
-    if (active) c.drawRoundRect(x - 24, y - 20, 48, 40, 8, HIGHLIGHT);
-    if (!active || blinkOn(ms, 1000, 750)) text(c, f == 0 ? hh : mm, x, y, INK, &fonts::Font4);
+    c.fillRoundRect(x - 28, y - 22, 56, 44, 8, active ? WHITE : CREAM);
+    if (active) {
+      c.drawRoundRect(x - 28, y - 22, 56, 44, 8, HIGHLIGHT);
+      arrow(c, x, y - 32, 6, 0, HIGHLIGHT);
+      arrow(c, x, y + 32, 6, 2, HIGHLIGHT);
+    }
+    text(c, f == 0 ? hh : mm, x, y + 1, INK, &fonts::Font4);
   }
-  text(c, ":", CX, y - 2, INK, &fonts::Font4);
-  text(c, "24-hour clock", CX, 156, rgb(140, 120, 120));
-  drawHint(c, "B: +1 (hold = fast)", ui.clockField == 0 ? "A: next" : "A: done");
+  text(c, ":", CX, y - 1, INK, &fonts::Font4);
+  (void)ms;
+  drawHint(c, "Up/Down: change   Left/Right: hours / minutes", "A: done");
 }
 
 static void screenGame(LGFX_Sprite& c, const PetState& pet, const UiState& ui, uint32_t ms) {
-  drawMeadow(c, SCENE_Y - 26);
-  drawTopBars(c, pet, ui, ms);
+  drawScene(c, TOP_H, BAR_Y, false, ms);
+  drawTopBar(c, pet, ui, ms);
 
   PetLook look = lookFor(pet);
   look.face = FACE_NORMAL;
@@ -772,103 +819,104 @@ static void screenGame(LGFX_Sprite& c, const PetState& pet, const UiState& ui, u
   if (revealed) {
     look.look = ui.gameLook ? 1 : -1;
     look.face = won ? FACE_HAPPY : FACE_OOPS;
-    x += look.look * 10;
+    x += look.look * 14;
   } else {
     look.look = (ms / 300) % 3 - 1;  // looking around, thinking
   }
   drawPet(c, look, x, GROUND_Y, sinf(ms / 260.0f) * 1.2f, ms);
 
-  int headY = GROUND_Y - petSize(look.stage) * 2 - 6;
+  int hy = headY(look.stage);
   if (finished && ms - ui.gameShownAt > 900) {
     char buf[24];
     snprintf(buf, sizeof(buf), "You got %d!", ui.gameScore);
-    bubbleText(c, buf, CX, headY - 16);
+    bubbleText(c, buf, CX, hy - 14);
   } else if (revealed) {
-    bubbleText(c, won ? "Yay! Again!" : "Hehe, nope!", x, headY - 16);
+    bubbleText(c, won ? "Yay! Again!" : "Hehe, nope!", x, hy - 14);
   } else {
-    bubbleText(c, "Which way?", CX, headY - 16);
+    bubbleText(c, "Which way?", CX, hy - 14);
+    int pulse = blinkOn(ms, 600, 300) ? 3 : 0;
+    arrow(c, 50 - pulse, GROUND_Y - 30, 14, 3, WHITE);
+    arrow(c, SCREEN_W - 50 + pulse, GROUND_Y - 30, 14, 1, WHITE);
   }
 
-  // round and score
+  // score stars
   for (int i = 0; i < GAME_ROUNDS; i++) {
-    int sx = CX - (GAME_ROUNDS - 1) * 9 + i * 18;
-    if (i < ui.gameScore) star(c, sx, SCENE_Y + 12, 7, STAR_YELLOW);
-    else c.drawCircle(sx, SCENE_Y + 12, 4, WHITE);
+    int sx = 22 + i * 18;
+    if (i < ui.gameScore) star(c, sx, TOP_H + 14, 7, STAR_YELLOW);
+    else c.drawCircle(sx, TOP_H + 14, 4, INK);
   }
-
-  c.fillRect(0, BAR_Y, SCREEN_W, SCREEN_H - BAR_Y, CREAM);
-  c.drawFastHLine(0, BAR_Y, SCREEN_W, CREAM_DARK);
-  c.fillTriangle(10, BAR_Y + 18, 22, BAR_Y + 8, 22, BAR_Y + 28, HIGHLIGHT);
-  c.fillTriangle(SCREEN_W - 10, BAR_Y + 18, SCREEN_W - 22, BAR_Y + 8, SCREEN_W - 22, BAR_Y + 28,
-                 HIGHLIGHT);
-  text(c, "A = left", 26, BAR_Y + 12, INK, &fonts::Font2, lgfx::middle_left);
-  text(c, "right = B", SCREEN_W - 26, BAR_Y + 30, INK, &fonts::Font2, lgfx::middle_right);
   char round[16];
   snprintf(round, sizeof(round), "Round %d of %d", ui.gameRound, GAME_ROUNDS);
-  text(c, round, CX, SCENE_Y + 26, WHITE, &fonts::Font0);
+  text(c, round, 22 + GAME_ROUNDS * 18, TOP_H + 14, INK, &fonts::Font2, lgfx::middle_left);
+
+  drawHint(c, "Guess with Left or Right!", "B: stop playing");
 }
 
-static void statRow(LGFX_Sprite& c, Icon icon, const char* name, float value, int y) {
-  drawIcon(c, icon, 14, y, 14);
-  text(c, name, 26, y - 1, INK, &fonts::Font2, lgfx::middle_left);
+static void statRow(LGFX_Sprite& c, Icon icon, const char* name, float value, int x, int y) {
+  drawIcon(c, icon, x + 8, y, 14);
+  text(c, name, x + 20, y - 1, INK, &fonts::Font2, lgfx::middle_left);
   int v = (int)(value + 0.5f);
   uint16_t col = v > 50 ? GOOD : (v > NEED_LOW ? MEH : BAD);
-  c.drawRoundRect(72, y - 6, 56, 12, 4, CREAM_DARK);
-  if (v > 0) c.fillRoundRect(73, y - 5, 54 * v / 100 + 1, 10, 3, col);
+  c.drawRoundRect(x + 74, y - 7, 82, 14, 4, CREAM_DARK);
+  if (v > 0) c.fillRoundRect(x + 75, y - 6, 80 * v / 100 + 1, 12, 3, col);
 }
 
 static void screenInfo(LGFX_Sprite& c, const PetState& pet, const UiState& ui, uint32_t ms) {
   c.fillRect(0, 0, SCREEN_W, SCREEN_H, CREAM);
-  PetLook look = lookFor(pet);
-  drawPet(c, look, CX, 100, sinf(ms / 260.0f) * 1.2f, ms);
-  drawTitle(c, pet.name);  // after the pet, so tall ears tuck under it
+  drawTitle(c, pet.name, "B: back");
 
-  statRow(c, ICON_APPLE, "Food", pet.food, 112);
-  statRow(c, ICON_STAR, "Fun", pet.fun, 132);
-  statRow(c, ICON_BOLT, "Energy", pet.energy, 152);
+  PetLook look = lookFor(pet);
+  drawPet(c, look, 70, 140, sinf(ms / 260.0f) * 1.2f, ms, CREAM_DARK);
+
+  const int x = 146;
+  statRow(c, ICON_APPLE, "Food", pet.food, x, 40);
+  statRow(c, ICON_STAR, "Fun", pet.fun, x, 62);
+  statRow(c, ICON_BOLT, "Energy", pet.energy, x, 84);
 
   static const char* const STAGES[] = {"Egg", "Baby", "Kid", "Grown-up"};
-  char buf[32];
+  char buf[40];
   uint32_t days = pet.ageSeconds / 86400, hours = pet.ageSeconds / 3600 % 24;
-  snprintf(buf, sizeof(buf), "%s, %lu d %lu h", STAGES[petStage(pet)], (unsigned long)days,
+  snprintf(buf, sizeof(buf), "%s, %lu days %lu hours", STAGES[petStage(pet)], (unsigned long)days,
            (unsigned long)hours);
-  text(c, buf, CX, 174, INK);
-  heart(c, CX - 30, 191, 5, HIGHLIGHT);
+  text(c, buf, x, 112, INK, &fonts::Font2, lgfx::middle_left);
+  heart(c, x + 8, 136, 6, HIGHLIGHT);
   snprintf(buf, sizeof(buf), "%lu hearts", (unsigned long)pet.hearts);
-  text(c, buf, CX - 20, 191, INK, &fonts::Font2, lgfx::middle_left);
-
+  text(c, buf, x + 20, 136, INK, &fonts::Font2, lgfx::middle_left);
   (void)ui;
-  drawHint(c, "Any button: back", nullptr);
 }
 
 static void screenSettings(LGFX_Sprite& c, const PetState& pet, const UiState& ui) {
   c.fillRect(0, 0, SCREEN_W, SCREEN_H, CREAM);
-  drawTitle(c, "Settings");
+  drawTitle(c, "Settings", "A: change   B: back");
 
   static const char* const NAMES[SET_COUNT] = {
-    "School mode", "Sound", "Brightness", "Auto off", "Bedtime", "Set clock", "New egg", "Back"};
+    "School mode", "Sound", "Brightness", "Auto sleep", "Bedtime (8pm-7am)", "Set clock",
+    "New egg", "Back"};
   static const char* const BRIGHT[3] = {"Low", "Mid", "High"};
-  const int rowH = 20, top = 30;
+  const int rowH = 18, top = TOP_H + 4;
   for (int i = 0; i < SET_COUNT; i++) {
     int y = top + i * rowH + rowH / 2;
     if (i == ui.cursor) {
-      c.fillRoundRect(3, y - rowH / 2 + 1, SCREEN_W - 6, rowH - 2, 6, WHITE);
-      c.drawRoundRect(3, y - rowH / 2 + 1, SCREEN_W - 6, rowH - 2, 6, HIGHLIGHT);
+      c.fillRoundRect(4, y - rowH / 2 + 1, SCREEN_W - 8, rowH - 2, 6, WHITE);
+      c.drawRoundRect(4, y - rowH / 2 + 1, SCREEN_W - 8, rowH - 2, 6, HIGHLIGHT);
     }
-    text(c, NAMES[i], 8, y, INK, &fonts::Font2, lgfx::middle_left);
+    text(c, NAMES[i], 12, y, INK, &fonts::Font2, lgfx::middle_left);
     char val[12] = "";
     switch (i) {
       case SET_SCHOOL: strcpy(val, pet.schoolMode ? "ON" : "off"); break;
       case SET_SOUND: strcpy(val, ui.soundOn ? "on" : "off"); break;
       case SET_BRIGHTNESS: strcpy(val, BRIGHT[ui.brightness % 3]); break;
       case SET_AUTO_OFF: snprintf(val, sizeof(val), "%d min", AUTO_OFF_MINUTES[ui.autoOff % 3]); break;
-      case SET_BEDTIME: strcpy(val, pet.bedtimeOn ? "8pm" : "off"); break;
+      case SET_BEDTIME: strcpy(val, pet.bedtimeOn ? "on" : "off"); break;
+      case SET_CLOCK:
+        if (ui.clock.valid) snprintf(val, sizeof(val), "%d:%02d", ui.clock.hour, ui.minute);
+        else strcpy(val, "not set");
+        break;
       default: break;
     }
-    uint16_t col = (i == SET_SCHOOL && pet.schoolMode) ? HIGHLIGHT : rgb(140, 120, 120);
-    text(c, val, SCREEN_W - 8, y, col, &fonts::Font2, lgfx::middle_right);
+    uint16_t col = (i == SET_SCHOOL && pet.schoolMode) ? HIGHLIGHT : SOFT_INK;
+    text(c, val, SCREEN_W - 14, y, col, &fonts::Font2, lgfx::middle_right);
   }
-  drawHint(c, "B: move  A: change", "PWR: back");
 }
 
 static void screenNewEgg(LGFX_Sprite& c, const PetState& pet, const UiState& ui, uint32_t ms) {
@@ -876,36 +924,35 @@ static void screenNewEgg(LGFX_Sprite& c, const PetState& pet, const UiState& ui,
   drawTitle(c, "New egg?");
   PetLook look = lookFor(pet);
   look.face = FACE_OOPS;
-  drawPet(c, look, CX, 110, 0, ms);
-  text(c, "This replaces", CX, 132, INK);
+  drawPet(c, look, 70, 124, 0, ms, CREAM_DARK);
+  text(c, "This replaces", 210, 52, INK);
   char buf[32];
   snprintf(buf, sizeof(buf), "%s forever.", pet.name);
-  text(c, buf, CX, 150, INK);
+  text(c, buf, 210, 72, INK);
 
-  c.drawRoundRect(12, 170, SCREEN_W - 24, 14, 5, INK);
-  int w = (SCREEN_W - 28) * ui.holdMs / 3000;
-  if (w > 0) c.fillRoundRect(14, 172, w, 10, 4, HIGHLIGHT);
-  drawHint(c, "Hold A for 3 sec", "B or PWR: no!");
+  c.drawRoundRect(140, 94, 140, 16, 5, INK);
+  int w = 136 * ui.holdMs / 3000;
+  if (w > 0) c.fillRoundRect(142, 96, w, 12, 4, HIGHLIGHT);
+  drawHint(c, "Hold A for 3 seconds", "B: no, keep it!");
 }
 
 static void screenBye(LGFX_Sprite& c, const PetState& pet, uint32_t ms) {
-  drawNight(c, ms);
-  c.fillRect(0, 0, SCREEN_W, SCENE_Y, NIGHT);
-  c.fillRect(0, BAR_Y, SCREEN_W, SCREEN_H - BAR_Y, NIGHT_GRASS);
-  PetLook look = lookFor(pet);
-  look.face = pet.hatched ? FACE_HAPPY : FACE_SLEEP;
-  if (pet.hatched) drawPet(c, look, CX, GROUND_Y, 0, ms);
-  bubbleText(c, "Bye bye!", CX, 80);
-  text(c, "Press PWR to wake", CX, 220, WHITE);
+  drawScene(c, 0, SCREEN_H, true, ms);
+  if (pet.hatched) {
+    PetLook look = lookFor(pet);
+    look.face = FACE_HAPPY;
+    drawPet(c, look, CX, GROUND_Y + 10, 0, ms, rgb(25, 60, 50));
+  }
+  bubbleText(c, "Bye bye!", CX, 34);
+  text(c, "Press A to wake me up", CX, SCREEN_H - 10, WHITE);
 }
 
 void uiDraw(LGFX_Sprite& c, const PetState& pet, const UiState& ui, uint32_t ms) {
-  c.setSwapBytes(true);  // the meadow image is stored as plain RGB565
   switch (ui.screen) {
     case SCR_EGG: screenEgg(c, ui, ms); break;
     case SCR_PICK_COLOR: screenPick(c, ui, ms, true); break;
     case SCR_PICK_EARS: screenPick(c, ui, ms, false); break;
-    case SCR_PICK_NAME: screenName(c, pet, ui, ms); break;
+    case SCR_PICK_NAME: screenName(c, ui, ms); break;
     case SCR_SET_CLOCK: screenClock(c, ui, ms); break;
     case SCR_HOME:
     case SCR_FEED: screenHome(c, pet, ui, ms); break;

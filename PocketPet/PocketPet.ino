@@ -1,58 +1,62 @@
-// PocketPet - a gentle virtual pet for the M5StickC Plus2.
+// PocketPet - a gentle virtual pet for a Game Boy-style handheld.
 //
-// Buttons (holding the stick upright, screen facing you):
-//   A   = the big button under the screen: do / choose
-//   B   = the button on the right side: next
-//   PWR = the button on the left side: back, or switch off from the home screen
+// Controls:
+//   D-pad   move around
+//   A       do it / choose
+//   B       back
+//   START   settings
+//   SELECT  sleep (switch off); A wakes it up again
 //
 // The pet never dies. If it's ignored it gets hungry, bored or sleepy, and
 // it always cheers up again once someone looks after it.
 
-#include <M5Unified.h>
 #include <Preferences.h>
 
 #include "config.h"
+#include "hardware.h"
 #include "pet.h"
 #include "ui.h"
 
-static M5Canvas canvas(&M5.Display);
+// Small types live up here, before any function, because the Arduino IDE
+// adds function prototypes above the first function it finds.
+struct Note { uint16_t freq; uint16_t ms; };
+struct Now { bool valid; uint8_t hour, minute; uint32_t epoch; };
+struct ButtonState { bool down; bool pressed; bool ignore; uint32_t since; uint32_t repeatAt; };
+
+static lgfx::LGFX_Sprite frame;
 static Preferences prefs;
 
 static PetState pet;
 static UiState ui;
+static ButtonState buttons[BTN_COUNT];
 
-static bool firstRun = false;     // going through egg -> color -> name -> clock
-static bool screenOff = false;    // only on USB power, when switching off didn't work
+static bool firstRun = false;     // going through egg -> color -> ears -> name -> clock
 static bool dimmed = false;
+static bool sleeping = false;     // only ever true in the computer simulation
 static uint32_t lastInputMs = 0;
 static uint32_t lastTickMs = 0;
 static uint32_t lastSaveMs = 0;
 static uint32_t lastNeedBeepMs = 0;
 static uint32_t lastBatteryMs = 0;
-static uint32_t repeatAtMs = 0;   // hold-to-repeat on B (and PWR in the name picker)
 static uint32_t newEggPressAt = 0; // the A press that opened "New egg?" doesn't count
 
-static const uint8_t BRIGHTNESS[3] = {40, 100, 180};
-static const uint8_t DIM_BRIGHTNESS = 12;
+static const uint8_t BRIGHTNESS[3] = {50, 120, 220};
+static const uint8_t DIM_BRIGHTNESS = 15;
 
 static const char* const RANDOM_NAMES[] = {
   "MOCHI", "BOBA", "PIP", "LULU", "NOODLE", "BUN", "SUKI", "POPPY", "BEAN", "TOFU", "KIWI", "MILO"};
+static const int RANDOM_NAME_COUNT = sizeof(RANDOM_NAMES) / sizeof(RANDOM_NAMES[0]);
 
 // ---------------------------------------------------------------------------
 // Sounds: tiny note sequences played without blocking (idea from TamaFi's
 // retro sound engine).
 // ---------------------------------------------------------------------------
-struct Note { uint16_t freq; uint16_t ms; };
-// The clock as read from the RTC. (Declared up here, before any function,
-// because the Arduino IDE adds function prototypes above the first one.)
-struct Now { bool valid; uint8_t hour, minute; uint32_t epoch; };
-
-static const Note SND_CLICK[] = {{2000, 25}, {0, 0}};
+static const Note SND_CLICK[] = {{2000, 20}, {0, 0}};
 static const Note SND_YUM[] = {{600, 60}, {900, 60}, {1200, 60}, {1500, 90}, {0, 0}};
 static const Note SND_HAPPY[] = {{1047, 80}, {1319, 80}, {1568, 120}, {0, 0}};
 static const Note SND_NO[] = {{500, 90}, {350, 140}, {0, 0}};
 static const Note SND_POOP[] = {{300, 80}, {200, 120}, {0, 0}};
-static const Note SND_CALL[] = {{1568, 90}, {0, 60}, {1568, 90}, {0, 60}, {2093, 160}, {0, 0}};
+static const Note SND_CALL[] = {{1568, 90}, {1, 60}, {1568, 90}, {1, 60}, {2093, 160}, {0, 0}};
 static const Note SND_HATCH[] = {{523, 80}, {659, 80}, {784, 80}, {1047, 80}, {1319, 200}, {0, 0}};
 static const Note SND_NIGHT[] = {{784, 120}, {659, 120}, {523, 200}, {0, 0}};
 static const Note SND_BYE[] = {{1047, 100}, {784, 100}, {523, 180}, {0, 0}};
@@ -69,8 +73,8 @@ static void play(const Note* s) {
 static void soundUpdate(uint32_t now) {
   if (!sndPlaying || now < sndNextMs) return;
   const Note& n = *sndPlaying;
-  if (n.ms == 0) { sndPlaying = nullptr; return; }
-  if (n.freq) M5.Speaker.tone(n.freq, n.ms);
+  if (n.ms == 0) { sndPlaying = nullptr; hwTone(0); return; }
+  hwTone(n.freq > 1 ? n.freq : 0);  // freq 1 = a short rest
   sndNextMs = now + n.ms;
   sndPlaying++;
 }
@@ -78,37 +82,31 @@ static void soundUpdate(uint32_t now) {
 // ---------------------------------------------------------------------------
 // Clock
 // ---------------------------------------------------------------------------
-
 static Now readClock() {
   Now n = {false, 0, 0, 0};
-  m5::rtc_datetime_t dt;
-  if (!M5.Rtc.isEnabled() || !M5.Rtc.getDateTime(&dt)) return n;
-  // A clock that lost power restarts in 2000; treat anything that old as unset.
-  if (dt.date.year < 2024 || dt.date.year > 2099) return n;
+  ClockReading r = hwClock();
+  if (!r.valid) return n;
   n.valid = true;
-  n.hour = dt.time.hours;
-  n.minute = dt.time.minutes;
-  n.epoch = fromDateTime(dt.date.year, dt.date.month, dt.date.date, dt.time.hours,
-                         dt.time.minutes, dt.time.seconds);
+  n.hour = r.hour;
+  n.minute = r.minute;
+  n.epoch = fromDateTime(r.year, r.month, r.day, r.hour, r.minute, r.second);
   return n;
 }
 
 static void setClock(uint8_t hour, uint8_t minute) {
-  m5::rtc_datetime_t dt;
-  bool haveDate = M5.Rtc.getDateTime(&dt) && dt.date.year >= 2024 && dt.date.year <= 2099;
-  if (!haveDate) {
+  ClockReading r = hwClock();
+  if (!r.valid) {
     // Only the time of day matters to the pet; start the calendar at the
     // build date so "time since last seen" works from here on.
     static const char* months = "JanFebMarAprMayJunJulAugSepOctNovDec";
     const char* d = __DATE__;  // "Mmm dd yyyy"
-    dt.date.year = atoi(d + 7);
-    dt.date.month = (strstr(months, String(d).substring(0, 3).c_str()) - months) / 3 + 1;
-    dt.date.date = atoi(d + 4);
+    r.year = atoi(d + 7);
+    r.day = atoi(d + 4);
+    r.month = 1;
+    for (int m = 0; m < 12; m++)
+      if (strncmp(months + m * 3, d, 3) == 0) r.month = m + 1;
   }
-  dt.time.hours = hour;
-  dt.time.minutes = minute;
-  dt.time.seconds = 0;
-  M5.Rtc.setDateTime(dt);
+  hwSetClock(r.year, r.month, r.day, hour, minute);
 }
 
 static void refreshClock() {
@@ -140,6 +138,33 @@ static void loadAll() {
     if (pet.version == PET_SAVE_VERSION) return;
   }
   petNewEgg(pet);
+}
+
+// ---------------------------------------------------------------------------
+// Buttons
+// ---------------------------------------------------------------------------
+static void readButtons(uint32_t now) {
+  for (int i = 0; i < BTN_COUNT; i++) {
+    ButtonState& b = buttons[i];
+    bool down = hwButtonDown((Button)i);
+    b.pressed = false;
+    if (down == b.down || now - b.since < 25) continue;  // 25 ms debounce
+    b.down = down;
+    b.since = now;
+    if (!down) { b.ignore = false; continue; }
+    if (!b.ignore) { b.pressed = true; b.repeatAt = now + 400; }
+  }
+}
+
+static bool pressed(Button b) { return buttons[b].pressed; }
+static bool held(Button b) { return buttons[b].down && !buttons[b].ignore; }
+
+// For the D-pad in lists: a press, then repeats while held.
+static bool repeating(Button b, uint32_t now) {
+  ButtonState& s = buttons[b];
+  if (s.pressed) return true;
+  if (s.down && !s.ignore && now >= s.repeatAt) { s.repeatAt = now + 120; return true; }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +200,7 @@ static uint32_t animLength(Anim a) {
 }
 
 static void applyBrightness(bool dim) {
-  M5.Display.setBrightness(dim ? DIM_BRIGHTNESS : BRIGHTNESS[ui.brightness]);
+  hwBrightness(dim ? DIM_BRIGHTNESS : BRIGHTNESS[ui.brightness]);
 }
 
 // Tell the kids why an action didn't happen.
@@ -193,9 +218,28 @@ static void explain(ActionResult r) {
   play(SND_NO);
 }
 
+static void openClock() {
+  Now n = readClock();
+  ui.clockHour = n.valid ? n.hour : 12;
+  ui.clockMinute = n.valid ? n.minute : 0;
+  ui.clockField = 0;
+  go(SCR_SET_CLOCK);
+}
+
+// The name as typed: slots trimmed of spaces at both ends.
+static void typedName(char* out) {
+  int start = 0, end = PET_NAME_MAX;
+  while (start < end && ui.nameBuf[start] == ' ') start++;
+  while (end > start && ui.nameBuf[end - 1] == ' ') end--;
+  memcpy(out, ui.nameBuf + start, end - start);
+  out[end - start] = '\0';
+}
+
 static void finishSetup() {
-  if (ui.nameBuf[0] == '\0') strcpy(ui.nameBuf, RANDOM_NAMES[random(12)]);
-  petHatch(pet, ui.nameBuf, ui.pickColor, ui.pickEars);
+  char name[PET_NAME_MAX + 1];
+  typedName(name);
+  if (!name[0]) strcpy(name, RANDOM_NAMES[random(RANDOM_NAME_COUNT)]);
+  petHatch(pet, name, ui.pickColor, ui.pickEars);
   firstRun = false;
   saveAll();
   go(SCR_HOME);
@@ -206,44 +250,30 @@ static void finishSetup() {
   play(SND_HAPPY);
 }
 
-static void switchOff() {
+static void goToSleep() {
   saveAll();
   go(SCR_BYE);
   play(SND_BYE);
   uint32_t until = millis() + 1500;
   while (millis() < until) {
     soundUpdate(millis());
-    uiDraw(canvas, pet, ui, millis());
-    canvas.pushSprite(0, 0);
+    uiDraw(frame, pet, ui, millis());
+    hwShow(frame);
     delay(30);
   }
-  Screen back = firstRun ? SCR_EGG : SCR_HOME;
-  M5.Power.powerOff();
-
-  // Still running: we're on USB power and can't switch off, so just turn the
-  // screen off until a button is pressed.
-  delay(300);
-  M5.Display.sleep();
-  M5.Display.setBrightness(0);
-  screenOff = true;
-  if (back == SCR_EGG) ui.eggTaps = 0;
-  go(back);
+  hwSleep();
+  sleeping = true;  // (only reached in the computer simulation)
 }
 
 // ---------------------------------------------------------------------------
-// Buttons
+// What each screen does with the buttons
 // ---------------------------------------------------------------------------
-// B (and PWR on the name picker) repeat while held, for fast scrolling.
-static bool repeating(m5::Button_Class& btn, uint32_t now) {
-  if (btn.wasPressed()) { repeatAtMs = now + 450; return true; }
-  if (btn.isPressed() && now >= repeatAtMs) { repeatAtMs = now + 110; return true; }
-  return false;
-}
-
-static void handleHome(bool a, bool b, bool pwr) {
-  if (pwr) { switchOff(); return; }
-  if (b) { ui.cursor = (ui.cursor + 1) % ACT_COUNT; play(SND_CLICK); }
-  if (!a) return;
+static void handleHome(uint32_t now) {
+  if (pressed(BTN_SELECT)) { goToSleep(); return; }
+  if (pressed(BTN_START)) { go(SCR_SETTINGS, SET_SCHOOL); play(SND_CLICK); return; }
+  if (repeating(BTN_RIGHT, now)) { ui.cursor = (ui.cursor + 1) % ACT_COUNT; play(SND_CLICK); }
+  if (repeating(BTN_LEFT, now)) { ui.cursor = (ui.cursor + ACT_COUNT - 1) % ACT_COUNT; play(SND_CLICK); }
+  if (!pressed(BTN_A)) return;
 
   Now n = readClock();
   PetClock clock = {n.valid, n.hour};
@@ -298,24 +328,23 @@ static void handleHome(bool a, bool b, bool pwr) {
   }
 }
 
-static void handleFeed(bool a, bool b, bool pwr) {
-  if (pwr) { go(SCR_HOME, ACT_FEED); return; }
-  if (b) { ui.cursor = (ui.cursor + 1) % FEED_COUNT; play(SND_CLICK); }
-  if (!a) return;
+static void handleFeed() {
+  if (pressed(BTN_B)) { go(SCR_HOME, ACT_FEED); play(SND_CLICK); return; }
+  if (pressed(BTN_LEFT) || pressed(BTN_RIGHT)) { ui.cursor = 1 - ui.cursor; play(SND_CLICK); }
+  if (!pressed(BTN_A)) return;
   uint8_t choice = ui.cursor;
   go(SCR_HOME, ACT_FEED);
-  if (choice == FEED_BACK) return;
   ActionResult r = choice == FEED_MEAL ? petFeedMeal(pet) : petFeedTreat(pet);
   if (r != RESULT_OK) { explain(r); return; }
   startAnim(choice == FEED_MEAL ? ANIM_MEAL : ANIM_TREAT);
   play(SND_YUM);
 }
 
-static void handleGame(bool a, bool b, bool pwr, uint32_t now) {
-  if (pwr) { go(SCR_HOME, ACT_PLAY); return; }
+static void handleGame(uint32_t now) {
+  if (pressed(BTN_B)) { go(SCR_HOME, ACT_PLAY); return; }
   if (ui.gameGuess < 0) {
-    if (!a && !b) return;
-    ui.gameGuess = b ? 1 : 0;
+    if (!pressed(BTN_LEFT) && !pressed(BTN_RIGHT)) return;
+    ui.gameGuess = pressed(BTN_RIGHT) ? 1 : 0;
     ui.gameLook = random(2);
     ui.gameShownAt = now;
     bool won = ui.gameGuess == ui.gameLook;
@@ -328,72 +357,90 @@ static void handleGame(bool a, bool b, bool pwr, uint32_t now) {
   uint32_t shown = now - ui.gameShownAt;
   if (ui.gameRound < GAME_ROUNDS) {
     if (shown > 1300) { ui.gameRound++; ui.gameGuess = -1; }
-  } else if (shown > 3000 || (shown > 1200 && (a || b))) {
+  } else if (shown > 3000 || (shown > 1200 && pressed(BTN_A))) {
     go(SCR_HOME, ACT_PLAY);
     startAnim(ANIM_CUDDLE);
   }
 }
 
-static void handleSettings(bool a, bool b, bool pwr) {
-  if (pwr) { go(SCR_HOME, ACT_SETTINGS); saveAll(); return; }
-  if (b) { ui.cursor = (ui.cursor + 1) % SET_COUNT; play(SND_CLICK); }
-  if (!a) return;
-  play(SND_CLICK);
+static void changeSetting(int dir) {
   switch (ui.cursor) {
     case SET_SCHOOL: pet.schoolMode = !pet.schoolMode; break;
-    case SET_SOUND: ui.soundOn = !ui.soundOn; break;
-    case SET_BRIGHTNESS: ui.brightness = (ui.brightness + 1) % 3; applyBrightness(false); break;
-    case SET_AUTO_OFF: ui.autoOff = (ui.autoOff + 1) % 3; break;
+    case SET_SOUND: ui.soundOn = !ui.soundOn; if (!ui.soundOn) hwTone(0); break;
+    case SET_BRIGHTNESS: ui.brightness = (ui.brightness + 3 + dir) % 3; applyBrightness(false); break;
+    case SET_AUTO_OFF: ui.autoOff = (ui.autoOff + 3 + dir) % 3; break;
     case SET_BEDTIME: pet.bedtimeOn = !pet.bedtimeOn; break;
-    case SET_CLOCK: {
-      Now n = readClock();
-      ui.clockHour = n.valid ? n.hour : 12;
-      ui.clockMinute = n.valid ? n.minute : 0;
-      ui.clockField = 0;
-      go(SCR_SET_CLOCK);
-      return;
-    }
-    case SET_NEW_EGG:
-      ui.holdMs = 0;
-      newEggPressAt = M5.BtnA.lastChange();
-      go(SCR_NEW_EGG);
-      return;
-    case SET_BACK: go(SCR_HOME, ACT_SETTINGS); break;
+    default: return;
   }
+  play(SND_CLICK);
   saveAll();
 }
 
-static void handleName(bool a, bool next, bool prev) {
-  if (next) ui.letter = (ui.letter + 1) % NAME_ENTRIES;
-  if (prev) ui.letter = (ui.letter + NAME_ENTRIES - 1) % NAME_ENTRIES;
-  if (next || prev) play(SND_CLICK);
-  if (!a) return;
-  size_t len = strlen(ui.nameBuf);
-  play(SND_CLICK);
-  if (ui.letter < 26) {
-    if (len < PET_NAME_MAX) { ui.nameBuf[len] = 'A' + ui.letter; ui.nameBuf[len + 1] = '\0'; }
-  } else if (ui.letter == NAME_DEL) {
-    if (len) ui.nameBuf[len - 1] = '\0';
-  } else if (ui.letter == NAME_RANDOM) {
-    strcpy(ui.nameBuf, RANDOM_NAMES[random(12)]);
-  } else {  // NAME_DONE
-    if (ui.nameBuf[0] == '\0') strcpy(ui.nameBuf, RANDOM_NAMES[random(12)]);
-    Now n = readClock();
-    ui.clockHour = n.valid ? n.hour : 12;
-    ui.clockMinute = n.valid ? n.minute : 0;
-    ui.clockField = 0;
-    go(SCR_SET_CLOCK);
+static void handleSettings(uint32_t now) {
+  if (pressed(BTN_B) || pressed(BTN_START)) { go(SCR_HOME, ACT_SETTINGS); saveAll(); play(SND_CLICK); return; }
+  if (repeating(BTN_DOWN, now)) { ui.cursor = (ui.cursor + 1) % SET_COUNT; play(SND_CLICK); }
+  if (repeating(BTN_UP, now)) { ui.cursor = (ui.cursor + SET_COUNT - 1) % SET_COUNT; play(SND_CLICK); }
+  if (pressed(BTN_RIGHT)) changeSetting(1);
+  if (pressed(BTN_LEFT)) changeSetting(-1);
+  if (!pressed(BTN_A)) return;
+  switch (ui.cursor) {
+    case SET_CLOCK: play(SND_CLICK); openClock(); break;
+    case SET_NEW_EGG:
+      play(SND_CLICK);
+      ui.holdMs = 0;
+      newEggPressAt = buttons[BTN_A].since;
+      go(SCR_NEW_EGG);
+      break;
+    case SET_BACK: play(SND_CLICK); go(SCR_HOME, ACT_SETTINGS); break;
+    default: changeSetting(1); break;
   }
 }
 
-static void handleClock(bool a, bool plus) {
-  if (plus) {
-    if (ui.clockField == 0) ui.clockHour = (ui.clockHour + 1) % 24;
-    else ui.clockMinute = (ui.clockMinute + 1) % 60;
+static const char NAME_LETTERS[] = " ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+static void handleName(uint32_t now) {
+  char& slot = ui.nameBuf[ui.nameCursor];
+  int letter = strchr(NAME_LETTERS, slot) ? strchr(NAME_LETTERS, slot) - NAME_LETTERS : 0;
+  const int count = sizeof(NAME_LETTERS) - 1;
+
+  if (repeating(BTN_UP, now)) { slot = NAME_LETTERS[letter % (count - 1) + 1]; play(SND_CLICK); }
+  if (repeating(BTN_DOWN, now)) { slot = NAME_LETTERS[letter <= 1 ? count - 1 : letter - 1]; play(SND_CLICK); }
+  if (pressed(BTN_RIGHT) && ui.nameCursor < PET_NAME_MAX - 1 && slot != ' ') {
+    ui.nameCursor++;
+    play(SND_CLICK);
   }
-  if (!a) return;
+  if (pressed(BTN_LEFT) && ui.nameCursor > 0) { ui.nameCursor--; play(SND_CLICK); }
+  if (pressed(BTN_B)) {
+    play(SND_CLICK);
+    if (slot != ' ') slot = ' ';
+    else if (ui.nameCursor > 0) ui.nameBuf[--ui.nameCursor] = ' ';
+    else go(SCR_PICK_EARS);
+  }
+  if (pressed(BTN_SELECT)) {
+    const char* n = RANDOM_NAMES[random(RANDOM_NAME_COUNT)];
+    memset(ui.nameBuf, ' ', PET_NAME_MAX);
+    memcpy(ui.nameBuf, n, strlen(n));
+    ui.nameCursor = strlen(n) - 1;
+    play(SND_HAPPY);
+  }
+  if (pressed(BTN_A) || pressed(BTN_START)) { play(SND_CLICK); openClock(); }
+}
+
+static void handleClock(uint32_t now) {
+  int dir = repeating(BTN_UP, now) ? 1 : repeating(BTN_DOWN, now) ? -1 : 0;
+  if (dir) {
+    if (ui.clockField == 0) ui.clockHour = (ui.clockHour + 24 + dir) % 24;
+    else ui.clockMinute = (ui.clockMinute + 60 + dir) % 60;
+  }
+  if (pressed(BTN_LEFT) || pressed(BTN_RIGHT)) { ui.clockField = 1 - ui.clockField; play(SND_CLICK); }
+  if (pressed(BTN_B)) {
+    play(SND_CLICK);
+    if (firstRun) go(SCR_PICK_NAME);
+    else go(SCR_SETTINGS, SET_CLOCK);
+    return;
+  }
+  if (!pressed(BTN_A) && !pressed(BTN_START)) return;
   play(SND_CLICK);
-  if (ui.clockField == 0) { ui.clockField = 1; return; }
   setClock(ui.clockHour, ui.clockMinute);
   refreshClock();
   if (firstRun) { finishSetup(); return; }
@@ -402,56 +449,52 @@ static void handleClock(bool a, bool plus) {
 }
 
 static void handleButtons(uint32_t now) {
-  bool a = M5.BtnA.wasPressed();
-  bool b = M5.BtnB.wasPressed();
-  bool pwr = M5.BtnPWR.wasClicked();
-  bool anyDown = M5.BtnA.isPressed() || M5.BtnB.isPressed() || M5.BtnPWR.isPressed();
-  if (a || b || pwr || anyDown) {
+  readButtons(now);
+  bool any = false;
+  for (auto& b : buttons) any |= b.pressed || (b.down && !b.ignore);
+  if (any) {
     lastInputMs = now;
-    if (screenOff) {  // wake up and swallow this press
-      screenOff = false;
-      dimmed = false;
-      M5.Display.wakeup();
-      applyBrightness(false);
-      return;
-    }
     if (dimmed) { dimmed = false; applyBrightness(false); }
   }
 
   // Let animations finish before taking new actions.
-  bool busy = ui.anim != ANIM_NONE;
-  if (busy && ui.screen != SCR_EGG) return;
+  if (ui.anim != ANIM_NONE && ui.screen != SCR_EGG) return;
 
   switch (ui.screen) {
     case SCR_EGG:
-      if (!a || ui.anim == ANIM_HATCH) break;
+      if (!pressed(BTN_A) || ui.anim == ANIM_HATCH) break;
       ui.eggTaps++;
       play(ui.eggTaps >= 3 ? SND_HATCH : SND_CLICK);
       if (ui.eggTaps >= 3) startAnim(ANIM_HATCH);
       break;
     case SCR_PICK_COLOR:
-      if (b) { ui.pickColor = (ui.pickColor + 1) % PET_COLOR_COUNT; play(SND_CLICK); }
-      if (a) { go(SCR_PICK_EARS); play(SND_CLICK); }
+      if (pressed(BTN_RIGHT)) { ui.pickColor = (ui.pickColor + 1) % PET_COLOR_COUNT; play(SND_CLICK); }
+      if (pressed(BTN_LEFT)) { ui.pickColor = (ui.pickColor + PET_COLOR_COUNT - 1) % PET_COLOR_COUNT; play(SND_CLICK); }
+      if (pressed(BTN_A)) { go(SCR_PICK_EARS); play(SND_CLICK); }
       break;
     case SCR_PICK_EARS:
-      if (b) { ui.pickEars = (ui.pickEars + 1) % EARS_COUNT; play(SND_CLICK); }
-      if (a) { go(SCR_PICK_NAME); ui.letter = 0; ui.nameBuf[0] = '\0'; play(SND_CLICK); }
+      if (pressed(BTN_RIGHT)) { ui.pickEars = (ui.pickEars + 1) % EARS_COUNT; play(SND_CLICK); }
+      if (pressed(BTN_LEFT)) { ui.pickEars = (ui.pickEars + EARS_COUNT - 1) % EARS_COUNT; play(SND_CLICK); }
+      if (pressed(BTN_B)) { go(SCR_PICK_COLOR); play(SND_CLICK); }
+      if (pressed(BTN_A)) {
+        go(SCR_PICK_NAME);
+        memset(ui.nameBuf, ' ', PET_NAME_MAX);
+        ui.nameBuf[PET_NAME_MAX] = '\0';
+        ui.nameCursor = 0;
+        play(SND_CLICK);
+      }
       break;
-    case SCR_PICK_NAME:
-      handleName(a, repeating(M5.BtnB, now), repeating(M5.BtnPWR, now));
-      break;
-    case SCR_SET_CLOCK:
-      handleClock(a, repeating(M5.BtnB, now));
-      break;
-    case SCR_HOME: handleHome(a, b, pwr); break;
-    case SCR_FEED: handleFeed(a, b, pwr); break;
-    case SCR_GAME: handleGame(a, b, pwr, now); break;
+    case SCR_PICK_NAME: handleName(now); break;
+    case SCR_SET_CLOCK: handleClock(now); break;
+    case SCR_HOME: handleHome(now); break;
+    case SCR_FEED: handleFeed(); break;
+    case SCR_GAME: handleGame(now); break;
     case SCR_INFO:
-      if (a || b || pwr) { go(SCR_HOME, ACT_INFO); play(SND_CLICK); }
+      if (pressed(BTN_A) || pressed(BTN_B) || pressed(BTN_START)) { go(SCR_HOME, ACT_INFO); play(SND_CLICK); }
       break;
-    case SCR_SETTINGS: handleSettings(a, b, pwr); break;
+    case SCR_SETTINGS: handleSettings(now); break;
     case SCR_NEW_EGG:
-      if (b || pwr) { go(SCR_SETTINGS, SET_NEW_EGG); break; }
+      if (pressed(BTN_B)) go(SCR_SETTINGS, SET_NEW_EGG);
       break;  // holding A is handled in loop()
     case SCR_BYE: break;
   }
@@ -468,8 +511,7 @@ static void tick(uint32_t now) {
   refreshClock();
   if (now - lastBatteryMs > 5000) {
     lastBatteryMs = now;
-    ui.batteryPercent = M5.Power.getBatteryLevel();
-    ui.charging = M5.Power.isCharging() == m5::Power_Class::is_charging;
+    ui.batteryPercent = hwBatteryPercent();
   }
   if (firstRun) return;
 
@@ -491,46 +533,48 @@ static void tick(uint32_t now) {
 
 // ---------------------------------------------------------------------------
 void setup() {
-  auto cfg = M5.config();
-  M5.begin(cfg);
-  M5.Display.setRotation(0);  // portrait, big button under the screen
-  M5.Speaker.setVolume(140);
-  randomSeed(esp_random());
+  hwBegin();
+  randomSeed(micros());
 
-  canvas.setColorDepth(16);
-  canvas.createSprite(SCREEN_W, SCREEN_H);
+  frame.setColorDepth(16);
+  frame.createSprite(SCREEN_W, SCREEN_H);
 
   prefs.begin("pocketpet", false);
   memset(&ui, 0, sizeof(ui));
+  memset(buttons, 0, sizeof(buttons));
   loadAll();
   applyBrightness(false);
   ui.gameGuess = -1;
-  ui.batteryPercent = M5.Power.getBatteryLevel();
+  ui.batteryPercent = hwBatteryPercent();
   refreshClock();
 
   uint32_t now = millis();
   lastInputMs = lastTickMs = lastSaveMs = lastBatteryMs = now;
   lastNeedBeepMs = now;  // no reminder right at switch-on
+  dimmed = false;
+  sleeping = false;
+  // The button that woke us (or is held at power-on) doesn't count as a press.
+  for (int i = 0; i < BTN_COUNT; i++) {
+    buttons[i].down = buttons[i].ignore = hwButtonDown((Button)i);
+    buttons[i].since = now;
+  }
 
   if (!pet.hatched) {
     firstRun = true;
     go(SCR_EGG);
     return;
   }
+  firstRun = false;
 
-  // Catch up on the time the stick was switched off.
+  // Catch up on the time it was asleep. (After the power switch was turned
+  // off the clock is unknown, so nothing is caught up; set it in Settings.)
   Now n = readClock();
   uint32_t away = (n.valid && pet.lastSeen && n.epoch > pet.lastSeen) ? n.epoch - pet.lastSeen : 0;
   if (n.valid) petCatchUp(pet, n.epoch);
   saveAll();
 
   go(SCR_HOME);
-  if (!n.valid) {  // the clock lost power: ask again
-    ui.clockHour = 12;
-    ui.clockMinute = 0;
-    ui.clockField = 0;
-    go(SCR_SET_CLOCK);
-  } else if (!pet.asleep && !pet.schoolMode) {
+  if (!pet.asleep && !pet.schoolMode) {
     say(away > 3 * 3600 ? "I missed you!" : "Hi!");
     startAnim(ANIM_HELLO);
     play(SND_HAPPY);
@@ -538,11 +582,12 @@ void setup() {
 }
 
 void loop() {
-  M5.update();
+  if (sleeping) return;
   uint32_t now = millis();
 
   soundUpdate(now);
   handleButtons(now);
+  if (sleeping) return;
 
   if (ui.anim != ANIM_NONE && now - ui.animStart > animLength(ui.anim)) {
     if (ui.anim == ANIM_HATCH) go(SCR_PICK_COLOR);
@@ -550,13 +595,12 @@ void loop() {
   }
 
   if (ui.screen == SCR_NEW_EGG) {
-    bool fresh = M5.BtnA.isPressed() && M5.BtnA.lastChange() != newEggPressAt;
-    uint32_t held = M5.BtnA.getUpdateMsec() - M5.BtnA.lastChange();
-    ui.holdMs = fresh ? (uint16_t)(held < 3000 ? held : 3000) : 0;
+    bool fresh = held(BTN_A) && buttons[BTN_A].since != newEggPressAt;
+    uint32_t heldMs = now - buttons[BTN_A].since;
+    ui.holdMs = fresh ? (uint16_t)(heldMs < 3000 ? heldMs : 3000) : 0;
     if (ui.holdMs >= 3000) {
       petNewEgg(pet);
       saveAll();
-      memset(ui.nameBuf, 0, sizeof(ui.nameBuf));
       ui.eggTaps = 0;
       firstRun = true;
       go(SCR_EGG);
@@ -565,17 +609,11 @@ void loop() {
 
   tick(now);
 
-  if (screenOff) { delay(50); return; }
-
   uint32_t idle = now - lastInputMs;
-  if (idle > AUTO_OFF_MINUTES[ui.autoOff] * 60000UL) {
-    switchOff();
-    lastInputMs = millis();
-    return;
-  }
+  if (idle > AUTO_OFF_MINUTES[ui.autoOff] * 60000UL) { goToSleep(); return; }
   if (!dimmed && idle > DIM_AFTER_S * 1000UL) { dimmed = true; applyBrightness(true); }
 
-  uiDraw(canvas, pet, ui, now);
-  canvas.pushSprite(0, 0);
-  delay(15);
+  uiDraw(frame, pet, ui, now);
+  hwShow(frame);
+  delay(10);
 }

@@ -3,13 +3,9 @@
 ## TamaFi
 
 PocketPet started from [TamaFi](https://github.com/cifertech/TamaFi) by
-CiferTech. Used here:
-
-- the meadow background (`PocketPet/meadow.h`, cut from TamaFi's 240x240
-  background image)
-- the idea of the small non-blocking "retro" sound sequencer
-
-The pet, its rules and the rest of the code are new. TamaFi's license:
+CiferTech, and its small non-blocking "retro" sound sequencer follows
+TamaFi's idea. No TamaFi code or artwork is copied here any more. TamaFi's
+license:
 
 ```
 MIT License
@@ -35,9 +31,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## M5Unified / M5GFX / LovyanGFX
+## EspBoy (LoverBoy)
 
-The firmware uses [M5Unified](https://github.com/m5stack/M5Unified) and
-[M5GFX](https://github.com/m5stack/M5GFX) (MIT), which include
-[LovyanGFX](https://github.com/lovyan03/LovyanGFX) (FreeBSD license). They are
-downloaded by the Arduino IDE or PlatformIO, not copied into this repository.
+The handheld is built on [EspBoy](https://github.com/paixonite/EspBoy) by
+Vitor Paixao: its circuit board, 3D-printed case and button wiring.
+`PocketPet/hardware.cpp` uses the same pin numbers so it runs on that board.
+EspBoy's files are linked to, not copied; its repository has no license
+file, so ask its author before selling boards or cases made from it.
+
+## LovyanGFX
+
+The firmware draws with [LovyanGFX](https://github.com/lovyan03/LovyanGFX)
+(FreeBSD license), which the Arduino IDE or PlatformIO downloads; it is not
+copied into this repository.
