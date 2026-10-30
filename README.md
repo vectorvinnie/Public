@@ -17,6 +17,28 @@ the arrow keys for the D-pad, **X** for A, **Z** for B, **Enter** for Start
 and **Shift** for Select, or click the buttons on screen. The pet is saved in
 that browser.
 
+### On an old Android tablet
+
+An old tablet makes a fine PocketPet with nothing erased, using the
+on-screen buttons:
+
+1. **Put the game online (free, once):** on GitHub, open this repository's
+   **Settings → Pages**, choose **Deploy from a branch**, branch `pocketpet`,
+   folder `/docs`, and **Save**. After a minute or two it's at
+   `https://<your-github-name>.github.io/<repository>/play.html`.
+2. **On the tablet:** update Chrome from the Play Store, open that address,
+   and tap **Full screen**. Chrome's menu → **Add to Home screen** gives it
+   an icon.
+3. **Lock the tablet to the game** with Android's *screen pinning*:
+   **Settings → Security → Screen pinning → On**. Open the game, tap the
+   square **Overview** button, and tap the pin on the game's card. To unpin,
+   hold **Back** and **Overview** together.
+
+Leave the tablet's own sleep settings alone: when its screen turns off, the
+pet is saved and the time away is caught up gently, like the handheld's
+sleep. Each browser keeps its own pet, so the tablet's pet is separate from
+one played on a computer.
+
 To rebuild it after changing the code, run
 `tools/web/build.sh <path to a LovyanGFX checkout>` (it needs Zig:
 `pip install ziglang`, then `ZIG="python3 -m ziglang"`).

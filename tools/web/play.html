@@ -174,6 +174,16 @@
     color: var(--table-ink);
   }
   .note { font-size: 13px; color: #806f81; }
+  .fullscreen {
+    border: 1px solid #d6c6d6;
+    border-bottom-width: 2px;
+    border-radius: 8px;
+    background: #fff;
+    padding: 6px 14px;
+    font: 600 14px/1.2 var(--font-toy);
+    color: var(--table-ink);
+    cursor: pointer;
+  }
 
   @media (max-width: 480px) {
     .controls { grid-template-columns: auto auto; }
@@ -216,6 +226,7 @@
   <p><kbd>Enter</kbd> Start</p>
   <p><kbd>Shift</kbd> Select</p>
   <p class="note">The pet is saved in this browser. Sound starts after your first button press.</p>
+  <p><button class="fullscreen" id="fullscreen" type="button">Full screen</button></p>
 </section>
 
 <script>
@@ -232,7 +243,7 @@
   // ---- Saving: localStorage, or memory if the browser won't allow it ----
   const memoryStore = {};
   const store = {
-    get(k) { try { const v = localStorage.getItem("pocketpet:" + k); if (v !== null) return v; } catch (e) {} return memoryStore[k] ?? null; },
+    get(k) { try { const v = localStorage.getItem("pocketpet:" + k); if (v !== null) return v; } catch (e) {} return k in memoryStore ? memoryStore[k] : null; },
     set(k, v) { memoryStore[k] = v; try { localStorage.setItem("pocketpet:" + k, v); } catch (e) {} },
   };
   const bytes = () => new Uint8Array(game.memory.buffer);
@@ -311,8 +322,8 @@
   const buttonEls = {};
   document.querySelectorAll("[data-btn]").forEach((el) => {
     const id = +el.dataset.btn;
-    (buttonEls[id] ||= []).push(el);
-    el.addEventListener("pointerdown", (e) => { e.preventDefault(); el.setPointerCapture?.(e.pointerId); press(id, true); });
+    (buttonEls[id] = buttonEls[id] || []).push(el);
+    el.addEventListener("pointerdown", (e) => { e.preventDefault(); if (el.setPointerCapture) el.setPointerCapture(e.pointerId); press(id, true); });
     for (const ev of ["pointerup", "pointercancel", "lostpointercapture"]) el.addEventListener(ev, () => press(id, false));
     el.addEventListener("contextmenu", (e) => e.preventDefault());
     el.addEventListener("keydown", (e) => { if (e.code === "Space") { e.preventDefault(); if (!e.repeat) press(id, true); } });
@@ -325,7 +336,7 @@
   function press(id, down) {
     if (!game) return;
     if (down) downAt[id] = performance.now();
-    else if (performance.now() - (downAt[id] ?? 0) < 80) {
+    else if (performance.now() - (downAt[id] || 0) < 80) {
       setTimeout(() => press(id, false), 80 - (performance.now() - downAt[id]));
       return;
     }
@@ -347,9 +358,38 @@
   addEventListener("keyup", (e) => { if (e.code in KEYS) press(KEYS[e.code], false); });
   addEventListener("blur", () => { for (let i = 0; i < 8; i++) press(i, false); });
 
+  // ---- The tab goes out of view (screen off, another app) ----
+  // Save and sleep, then catch up gently on return, like the handheld does.
+  let suspended = false;
+  document.addEventListener("visibilitychange", () => {
+    if (!game) return;
+    if (document.hidden && !sleeping && !suspended) {
+      suspended = true;
+      tone(0);
+      game.pp_suspend();
+    } else if (!document.hidden && suspended) {
+      suspended = false;
+      game.pp_wake();
+    }
+  });
+
+  // ---- Full screen (and landscape, where the browser allows it) ----
+  const fullscreenButton = document.getElementById("fullscreen");
+  const root = document.documentElement;
+  const goFull = root.requestFullscreen || root.webkitRequestFullscreen;
+  if (!goFull) fullscreenButton.hidden = true;
+  fullscreenButton.addEventListener("click", () => {
+    try {
+      const p = goFull.call(root);
+      if (p && p.then) p.then(() => {
+        if (screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(() => {});
+      }).catch(() => {});
+    } catch (e) {}
+  });
+
   // ---- Start ----
   function frame() {
-    if (!sleeping) game.pp_loop();
+    if (!sleeping && !suspended) game.pp_loop();
     requestAnimationFrame(frame);
   }
   const wasm = Uint8Array.from(atob(WASM), (c) => c.charCodeAt(0));

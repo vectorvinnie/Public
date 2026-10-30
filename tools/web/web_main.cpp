@@ -66,3 +66,6 @@ EXPORT(pp_start) void pp_start() { setup(); }
 EXPORT(pp_loop) void pp_loop() { loop(); }
 EXPORT(pp_button) void pp_button(int b, int down) { if (b >= 0 && b < BTN_COUNT) keys[b] = down; }
 EXPORT(pp_wake) void pp_wake() { woke = true; setup(); }
+// The page was hidden (screen off, another app): save, and treat it like the
+// handheld's sleep, so pp_wake() catches up the time away gently.
+EXPORT(pp_suspend) void pp_suspend() { saveAll(); hwTone(0); sleeping = true; }
