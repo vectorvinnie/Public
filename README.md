@@ -45,6 +45,26 @@ rechargeable battery and a 3D-printed case.
 That comes to roughly **$35–45 each**. The two handhelds can share the
 circuit-board order.
 
+### Buying in Canada
+
+Digi-Key.ca has some of these parts. The T-Display S3 and the TP4056 module
+aren't sold there.
+
+| Part | Where | Part number |
+|---|---|---|
+| 12 × 12 mm buttons (8, plus spares) | Digi-Key | Omron/Aratas **B3F-4055**, Digi-Key **SW414-ND** |
+| Round caps for them (optional) | Digi-Key | Omron **B32** series, e.g. B32-1380 |
+| 10 kΩ ¼ W resistors (8) | Digi-Key | e.g. Stackpole CF14JT10K0 |
+| LiPo battery, 1200 mAh, 62 × 34 × 5 mm (check it fits your case) | Digi-Key | Adafruit **258**, Digi-Key **1528-1838-ND** |
+| T-Display S3, plain LCD, no touch, soldered pins | [LILYGO store](https://lilygo.cc/en-us/products/t-display-s3) or Amazon.ca | |
+| TP4056 USB-C charging module (the common blue board) | Amazon.ca | |
+| Circuit boards | JLCPCB, from EspBoy's Gerber zip | |
+| Buzzer and slide switch in EspBoy's exact sizes | LCSC, added to the JLCPCB order | buzzer **C49246969**, switch **C22435641** |
+| M2 × 16 mm screws and M2 nuts | hardware store | |
+
+Check live prices and stock before ordering; these part numbers came from
+Digi-Key's listings in October 2026.
+
 ### Building it
 
 1. **Board:** order the circuit board from the Gerber file in EspBoy's
@@ -78,6 +98,26 @@ circuit-board order.
 > If the upload can't find the board, hold the T-Display's **BOOT** button
 > while plugging it in, then try again. If the picture is upside down, change
 > `SCREEN_ROTATION` in `PocketPet/hardware.cpp` from 1 to 3.
+
+## Updating the game later, over WiFi
+
+In EspBoy's case, the outside USB-C port only charges the battery; the port
+that updates the game is inside. So after the first upload, update over WiFi
+instead of opening the case:
+
+1. **Once, before the first USB upload:** copy `PocketPet/wifi_secrets.example.h`
+   to `PocketPet/wifi_secrets.h` and fill in your WiFi name and password, and
+   pick an update password. (`wifi_secrets.h` never goes to GitHub.)
+2. **Each update:** on the handheld press **START → Update over WiFi**. It
+   joins your WiFi and shows a name like `pocketpet-3a7f`.
+3. In the Arduino IDE, pick that name under **Tools → Port**, click
+   **Upload**, and type the update password when asked. The handheld shows a
+   progress bar, saves the pet, and restarts with the new version.
+
+The computer and the handheld must be on the same WiFi. The handheld stays
+on for 10 minutes while waiting, and B cancels. If a WiFi upload fails
+saying there's no room, set **Tools → Partition Scheme** to one with two app
+slots (its name mentions "OTA" or "3MB APP"), then upload once more over USB.
 
 ## How to play
 
@@ -126,6 +166,7 @@ Press START. Up/Down picks a line; A (or Left/Right) changes it; B goes back.
 | **Auto sleep** | Goes to sleep after 1, 2 or 5 minutes without a button press. The screen dims after 20 seconds. |
 | **Bedtime** | On (the default): the pet falls asleep by itself at 8 pm and wakes at 7 am. If the kids wake it at night, it stays up a couple of minutes, then goes back to sleep. |
 | **Set clock** | 24-hour time. |
+| **Update over WiFi** | Gets a new version of the game from the Arduino IDE (see above). |
 | **New egg** | Starts over. You have to hold A for 3 seconds so it can't happen by accident. |
 
 ## Sleeping vs. the power switch

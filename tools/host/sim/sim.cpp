@@ -35,6 +35,21 @@ void hwTone(uint16_t freq) { if (freq) tones++; }
 int hwBatteryPercent() { return 64; }
 void hwSleep() { sleeps++; }
 
+// Pretend WiFi: joins on the second poll; the script can then "upload".
+static bool simWifiHasSecrets = true;
+static int simWifiPolls = 0;
+static WifiUpdateState simWifi = WIFI_OFF;
+void hwWifiUpdateStart() { simWifi = simWifiHasSecrets ? WIFI_CONNECTING : WIFI_NOT_SET_UP; simWifiPolls = 0; }
+void hwWifiUpdateStop() { simWifi = WIFI_OFF; }
+WifiUpdateStatus hwWifiUpdatePoll() {
+  if (simWifi == WIFI_CONNECTING && ++simWifiPolls >= 2) simWifi = WIFI_READY;
+  WifiUpdateStatus s = {};
+  s.state = simWifi;
+  strcpy(s.network, "HomeWiFi");
+  if (simWifi == WIFI_READY) strcpy(s.address, "pocketpet-3a7f at 192.168.1.23");
+  return s;
+}
+
 static uint32_t clockNow() { return clockBase + (simMillis - clockBaseMillis) / 1000; }
 
 ClockReading hwClock() {
@@ -325,6 +340,26 @@ int main(int argc, char** argv) {
   tap(BTN_UP, 3);  // 15:00
   tap(BTN_A);
   CHECK(ui.screen == SCR_SETTINGS && ui.clock.valid && ui.clock.hour == 15);
+
+  // --- Update over WiFi: connects, waits, saves the pet when an upload starts ---
+  tap(BTN_DOWN);
+  CHECK(ui.cursor == SET_WIFI);
+  tap(BTN_A);
+  CHECK(ui.screen == SCR_WIFI);
+  runFor(200);
+  CHECK(ui.wifi.state == WIFI_READY);
+  snap("wifi-ready");
+  runFor(5 * 60000);                     // waiting doesn't send it to sleep...
+  CHECK(ui.screen == SCR_WIFI);
+  pet.hearts = 777;
+  simFlash.erase("pet");
+  appUpdateProgress(0);                  // ...and an upload saves the pet first
+  appUpdateProgress(40);
+  CHECK(ui.wifiUpdating && ui.wifiProgress == 40 && simFlash.count("pet"));
+  snap("wifi-updating");
+  ui.wifiUpdating = false;
+  tap(BTN_B);
+  CHECK(ui.screen == SCR_SETTINGS && simWifi == WIFI_OFF);
 
   // --- Start over: needs a fresh 3-second hold on A ---
   tap(BTN_DOWN);

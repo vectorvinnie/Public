@@ -26,6 +26,9 @@ bool hwButtonDown(Button b) { return keys[b]; }
 void hwTone(uint16_t freq) { js_tone(freq); }
 int hwBatteryPercent() { return 100; }
 void hwSleep() { js_sleep(); }
+void hwWifiUpdateStart() {}
+void hwWifiUpdateStop() {}
+WifiUpdateStatus hwWifiUpdatePoll() { WifiUpdateStatus s = {}; s.state = WIFI_UNAVAILABLE; return s; }
 
 ClockReading hwClock() {
   ClockReading r = {};

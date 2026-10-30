@@ -4,6 +4,8 @@
 #include "hardware.h"
 
 #include <Arduino.h>
+#include <ArduinoOTA.h>
+#include <WiFi.h>
 #include <driver/gpio.h>
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
@@ -26,6 +28,17 @@ static const uint8_t PIN_POWER_ON = 15;    // keeps the screen powered on batter
 static const uint8_t PIN_BATTERY = 4;      // battery voltage through a 1:2 divider
 static const uint8_t PIN_BACKLIGHT = 38;
 static const uint8_t BUZZER_CHANNEL = 0;   // the backlight uses LEDC channel 7
+
+#if __has_include("wifi_secrets.h")
+#include "wifi_secrets.h"
+#endif
+#ifndef WIFI_NAME
+#define WIFI_NAME ""
+#define WIFI_PASSWORD ""
+#endif
+#ifndef UPDATE_PASSWORD
+#define UPDATE_PASSWORD ""
+#endif
 
 // Buttons that can wake the board (they must be RTC pins: GPIO 0-21).
 static const uint8_t WAKE_PINS[] = {17, 21, 18, 1, 3, 2};
@@ -173,7 +186,62 @@ void hwSetClock(int year, int month, int day, int hour, int minute) {
   settimeofday(&tv, nullptr);
 }
 
+// ---- WiFi updates (ArduinoOTA) ----
+static WifiUpdateState wifiState = WIFI_OFF;
+static uint32_t wifiStartedMs = 0;
+static bool otaStarted = false;
+static char hostname[24];
+
+void hwWifiUpdateStart() {
+  if (WIFI_NAME[0] == '\0') { wifiState = WIFI_NOT_SET_UP; return; }
+  uint64_t mac = ESP.getEfuseMac();  // readable before WiFi starts
+  snprintf(hostname, sizeof(hostname), "pocketpet-%02x%02x", (unsigned)(mac >> 32) & 0xff,
+           (unsigned)(mac >> 40) & 0xff);
+  WiFi.setHostname(hostname);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_NAME, WIFI_PASSWORD);
+  wifiState = WIFI_CONNECTING;
+  wifiStartedMs = millis();
+  otaStarted = false;
+}
+
+void hwWifiUpdateStop() {
+  if (otaStarted) ArduinoOTA.end();
+  otaStarted = false;
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  wifiState = WIFI_OFF;
+}
+
+WifiUpdateStatus hwWifiUpdatePoll() {
+  if (wifiState == WIFI_CONNECTING) {
+    if (WiFi.status() == WL_CONNECTED) {
+      ArduinoOTA.setHostname(hostname);
+      if (UPDATE_PASSWORD[0]) ArduinoOTA.setPassword(UPDATE_PASSWORD);
+      ArduinoOTA.onStart([]() { appUpdateProgress(0); });
+      ArduinoOTA.onProgress([](unsigned int done, unsigned int total) {
+        appUpdateProgress(total ? done * 100 / total : 0);
+      });
+      ArduinoOTA.begin();
+      otaStarted = true;
+      wifiState = WIFI_READY;
+    } else if (millis() - wifiStartedMs > 20000) {
+      WiFi.disconnect(true);
+      wifiState = WIFI_FAILED;
+    }
+  }
+  if (otaStarted) ArduinoOTA.handle();  // an upload runs right here, then restarts
+
+  WifiUpdateStatus s = {};
+  s.state = wifiState;
+  snprintf(s.network, sizeof(s.network), "%s", WIFI_NAME);
+  if (wifiState == WIFI_READY)
+    snprintf(s.address, sizeof(s.address), "%s at %s", hostname, WiFi.localIP().toString().c_str());
+  return s;
+}
+
 void hwSleep() {
+  if (wifiState != WIFI_OFF) hwWifiUpdateStop();
   hwTone(0);
   // Wait for the button that sent us to sleep to be let go, or we'd wake at once.
   uint32_t start = millis();

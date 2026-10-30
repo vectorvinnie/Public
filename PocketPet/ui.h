@@ -5,6 +5,7 @@
 // screenshots on a computer (see tools/host).
 #pragma once
 #include <stdint.h>
+#include "hardware.h"
 #include "pet.h"
 
 #include <LovyanGFX.hpp>
@@ -29,6 +30,7 @@ enum Screen : uint8_t {
   SCR_INFO,
   SCR_SETTINGS,
   SCR_NEW_EGG,      // hold-to-confirm start over
+  SCR_WIFI,         // waiting for an update over WiFi
   SCR_BYE,          // shown just before going to sleep
 };
 
@@ -41,7 +43,7 @@ enum FeedChoice : uint8_t { FEED_MEAL, FEED_TREAT, FEED_COUNT };
 
 enum SettingsItem : uint8_t {
   SET_SCHOOL, SET_SOUND, SET_BRIGHTNESS, SET_AUTO_OFF, SET_BEDTIME, SET_CLOCK,
-  SET_NEW_EGG, SET_BACK, SET_COUNT
+  SET_WIFI, SET_NEW_EGG, SET_COUNT
 };
 
 // Short animations played on the home screen after an action.
@@ -77,6 +79,11 @@ struct UiState {
   uint32_t gameShownAt;    // ms the answer was revealed
 
   uint16_t holdMs;         // progress of "hold A" on SCR_NEW_EGG
+
+  // Updating over WiFi
+  WifiUpdateStatus wifi;
+  bool wifiUpdating;       // an upload is coming in
+  uint8_t wifiProgress;    // 0..100
 
   // Device status for the top bar and settings
   int batteryPercent;      // -1 unknown

@@ -251,6 +251,20 @@ static void finishSetup() {
   play(SND_HAPPY);
 }
 
+// Called by the hardware layer while a WiFi update is coming in. The main
+// loop is paused, so save the pet first and draw the progress here.
+void appUpdateProgress(uint8_t percent) {
+  if (!ui.wifiUpdating) {
+    ui.wifiUpdating = true;
+    saveAll();
+  } else if (percent == ui.wifiProgress) {
+    return;
+  }
+  ui.wifiProgress = percent;
+  uiDraw(frame, pet, ui, millis());
+  hwShow(frame);
+}
+
 // Says "Bye bye!" for a moment; loop() then puts the handheld to sleep.
 static void goToSleep() {
   saveAll();
@@ -385,7 +399,13 @@ static void handleSettings(uint32_t now) {
       newEggPressAt = buttons[BTN_A].since;
       go(SCR_NEW_EGG);
       break;
-    case SET_BACK: play(SND_CLICK); go(SCR_HOME, ACT_SETTINGS); break;
+    case SET_WIFI:
+      play(SND_CLICK);
+      ui.wifiUpdating = false;
+      hwWifiUpdateStart();
+      ui.wifi = hwWifiUpdatePoll();
+      go(SCR_WIFI);
+      break;
     default: changeSetting(1); break;
   }
 }
@@ -487,6 +507,9 @@ static void handleButtons(uint32_t now) {
       if (pressed(BTN_A) || pressed(BTN_B) || pressed(BTN_START)) { go(SCR_HOME, ACT_INFO); play(SND_CLICK); }
       break;
     case SCR_SETTINGS: handleSettings(now); break;
+    case SCR_WIFI:
+      if (pressed(BTN_B)) { hwWifiUpdateStop(); go(SCR_SETTINGS, SET_WIFI); play(SND_CLICK); }
+      break;
     case SCR_NEW_EGG:
       if (pressed(BTN_B)) go(SCR_SETTINGS, SET_NEW_EGG);
       break;  // holding A is handled in loop()
@@ -613,10 +636,14 @@ void loop() {
     }
   }
 
+  if (ui.screen == SCR_WIFI) ui.wifi = hwWifiUpdatePoll();
+
   tick(now);
 
+  // Waiting for an update gets 10 minutes before sleeping, so there's time to upload.
   uint32_t idle = now - lastInputMs;
-  if (idle > AUTO_OFF_MINUTES[ui.autoOff] * 60000UL) { goToSleep(); return; }
+  uint32_t sleepAfter = ui.screen == SCR_WIFI ? 10 * 60000UL : AUTO_OFF_MINUTES[ui.autoOff] * 60000UL;
+  if (idle > sleepAfter) { goToSleep(); return; }
   if (!dimmed && idle > DIM_AFTER_S * 1000UL) { dimmed = true; applyBrightness(true); }
 
   uiDraw(frame, pet, ui, now);

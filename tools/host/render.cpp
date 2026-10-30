@@ -157,8 +157,14 @@ int main(int argc, char** argv) {
 
   u = baseUi(); u.screen = SCR_NEW_EGG; u.holdMs = 1800;
   shot("18-new-egg", p, u, 100);
+  u.screen = SCR_WIFI; u.wifi.state = WIFI_READY; strcpy(u.wifi.network, "HomeWiFi");
+  strcpy(u.wifi.address, "pocketpet-3a7f at 192.168.1.23");
+  shot("19-wifi-ready", p, u, 100);
+  u.screen = SCR_WIFI; u.wifi.state = WIFI_NOT_SET_UP;
+  shot("20-wifi-not-set-up", p, u, 100);
+  u = baseUi();
   u.screen = SCR_BYE;
-  shot("19-bye", p, u, 100);
+  shot("21-bye", p, u, 100);
 
   // Everything side by side in one picture.
   int w = SCREEN_W * SCALE, h = SCREEN_H * SCALE, gap = 12;

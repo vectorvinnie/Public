@@ -891,7 +891,7 @@ static void screenSettings(LGFX_Sprite& c, const PetState& pet, const UiState& u
 
   static const char* const NAMES[SET_COUNT] = {
     "School mode", "Sound", "Brightness", "Auto sleep", "Bedtime (8pm-7am)", "Set clock",
-    "New egg", "Back"};
+    "Update over WiFi", "New egg"};
   static const char* const BRIGHT[3] = {"Low", "Mid", "High"};
   const int rowH = 18, top = TOP_H + 4;
   for (int i = 0; i < SET_COUNT; i++) {
@@ -936,6 +936,78 @@ static void screenNewEgg(LGFX_Sprite& c, const PetState& pet, const UiState& ui,
   drawHint(c, "Hold A for 3 seconds", "B: no, keep it!");
 }
 
+static void wifiIcon(LGFX_Sprite& c, int x, int y, uint16_t color, int bars) {
+  c.fillCircle(x, y, 4, color);
+  for (int i = 1; i <= 3; i++) {
+    if (i <= bars) c.fillArc(x, y, 6 + i * 9, 1 + i * 9, 225, 315, color);
+  }
+}
+
+static void screenWifi(LGFX_Sprite& c, const UiState& ui, uint32_t ms) {
+  c.fillRect(0, 0, SCREEN_W, SCREEN_H, CREAM);
+  drawTitle(c, "Update over WiFi", ui.wifiUpdating ? nullptr : "B: stop");
+  const WifiUpdateStatus& w = ui.wifi;
+  const int tx = 104;
+  char line[64];
+
+  if (ui.wifiUpdating) {
+    wifiIcon(c, 52, 100, HIGHLIGHT, 3);
+    text(c, "Getting the new version...", tx, 52, INK, &fonts::Font2, lgfx::middle_left);
+    text(c, "Don't switch off!", tx, 72, SOFT_INK, &fonts::Font2, lgfx::middle_left);
+    c.drawRoundRect(tx, 92, 200, 18, 6, INK);
+    int fill = 196 * ui.wifiProgress / 100;
+    if (fill > 0) c.fillRoundRect(tx + 2, 94, fill, 14, 5, HIGHLIGHT);
+    snprintf(line, sizeof(line), "%d%%", ui.wifiProgress);
+    text(c, line, tx + 100, 124, INK);
+    return;
+  }
+
+  switch (w.state) {
+    case WIFI_CONNECTING:
+      wifiIcon(c, 52, 100, SOFT_INK, 1 + (ms / 400) % 3);
+      snprintf(line, sizeof(line), "Joining %s", w.network);
+      text(c, line, tx, 70, INK, &fonts::Font2, lgfx::middle_left);
+      text(c, (ms / 400) % 4 == 0 ? "" : (ms / 400) % 4 == 1 ? "." : (ms / 400) % 4 == 2 ? ".." : "...",
+           tx, 90, INK, &fonts::Font2, lgfx::middle_left);
+      break;
+    case WIFI_READY: {
+      wifiIcon(c, 52, 100, GOOD, 3);
+      // "pocketpet-3a7f at 192.168.1.23": the name on one line, the address below.
+      char name[48];
+      snprintf(name, sizeof(name), "%s", w.address);
+      char* at = strstr(name, " at ");
+      if (at) *at = '\0';
+      text(c, "Ready for a new version!", tx, 40, INK, &fonts::Font2, lgfx::middle_left);
+      text(c, "In the Arduino IDE, pick this", tx, 62, SOFT_INK, &fonts::Font2, lgfx::middle_left);
+      text(c, "under Tools > Port:", tx, 80, SOFT_INK, &fonts::Font2, lgfx::middle_left);
+      c.fillRoundRect(tx - 6, 92, SCREEN_W - tx - 4, 40, 6, WHITE);
+      text(c, name, tx, 103, INK, &fonts::Font2, lgfx::middle_left);
+      if (at) text(c, at + 1, tx, 121, SOFT_INK, &fonts::Font2, lgfx::middle_left);
+      text(c, "then click Upload.", tx, 148, SOFT_INK, &fonts::Font2, lgfx::middle_left);
+      break;
+    }
+    case WIFI_FAILED:
+      wifiIcon(c, 52, 100, BAD, 1);
+      snprintf(line, sizeof(line), "Couldn't join %s.", w.network);
+      text(c, line, tx, 60, INK, &fonts::Font2, lgfx::middle_left);
+      text(c, "Check the WiFi name and", tx, 84, SOFT_INK, &fonts::Font2, lgfx::middle_left);
+      text(c, "password in wifi_secrets.h.", tx, 102, SOFT_INK, &fonts::Font2, lgfx::middle_left);
+      break;
+    case WIFI_UNAVAILABLE:
+      wifiIcon(c, 52, 100, CREAM_DARK, 3);
+      text(c, "This is the browser version.", tx, 70, INK, &fonts::Font2, lgfx::middle_left);
+      text(c, "WiFi updates are for the handheld.", tx, 92, SOFT_INK, &fonts::Font2, lgfx::middle_left);
+      break;
+    default:  // not set up
+      wifiIcon(c, 52, 100, CREAM_DARK, 3);
+      text(c, "WiFi isn't set up yet.", tx, 52, INK, &fonts::Font2, lgfx::middle_left);
+      text(c, "Put your WiFi name and", tx, 78, SOFT_INK, &fonts::Font2, lgfx::middle_left);
+      text(c, "password in wifi_secrets.h,", tx, 96, SOFT_INK, &fonts::Font2, lgfx::middle_left);
+      text(c, "then upload once over USB.", tx, 114, SOFT_INK, &fonts::Font2, lgfx::middle_left);
+      break;
+  }
+}
+
 static void screenBye(LGFX_Sprite& c, const PetState& pet, uint32_t ms) {
   drawScene(c, 0, SCREEN_H, true, ms);
   if (pet.hatched) {
@@ -960,6 +1032,7 @@ void uiDraw(LGFX_Sprite& c, const PetState& pet, const UiState& ui, uint32_t ms)
     case SCR_INFO: screenInfo(c, pet, ui, ms); break;
     case SCR_SETTINGS: screenSettings(c, pet, ui); break;
     case SCR_NEW_EGG: screenNewEgg(c, pet, ui, ms); break;
+    case SCR_WIFI: screenWifi(c, ui, ms); break;
     case SCR_BYE: screenBye(c, pet, ms); break;
   }
 }
